@@ -1,0 +1,94 @@
+# salt-fi
+
+Rebuild of `KagamiDigital/salt-autofi` on Salt's new SDK (INTU has been replaced).
+Salt is in Beta — treat all of this as subject to change; verify against
+current docs/types before relying on anything below long-term.
+
+## The SDK itself
+
+- **Real package**: `@kagamidigital/salt-sdk-mirror`, scoped, distributed via
+  **GitHub Packages** — NOT public npm. A public npm package literally named
+  `salt-sdk` exists and is unrelated/unaffiliated; do not install it.
+- Install requires a `.npmrc` with a GitHub PAT (`read:packages` scope) and
+  being added as an external collaborator on the `salt-sdk-mirror` repo.
+  ```
+  @kagamidigital:registry=https://npm.pkg.github.com
+  //npm.pkg.github.com/:_authToken=YOUR_CLASSIC_PAT
+  ```
+  `.npmrc` contains a real credential once the token is in it — gitignore it.
+- Docs: https://kagamidigital.github.io/docs/
+- TypeDoc/API reference: https://kagamidigital.github.io/salt-sdk-mirror/
+- When published docs and the installed package's actual type definitions
+  disagree, trust the type definitions — this is beta software and docs can
+  lag behind. Read `node_modules/@kagamidigital/salt-sdk-mirror` directly
+  when in doubt.
+- Requires `"type": "module"` in package.json — the SDK ships with top-level
+  `await` in an ESM file, which breaks under CJS-default Node resolution.
+
+## Authentication model
+
+- Wallet-based, SIWE (Sign-In with Ethereum). An EOA signs a login message
+  via a viem `walletClient`; Salt verifies and issues a session token scoped
+  to a **domain**.
+- Constructor: `new Salt({ environment: 'TESTNET', domain: 'testnet.salt.space' })`
+- **Domain matters a lot**: Robo Guardian configuration (API keys, seed
+  material) is only returned to sessions authenticated against Salt's
+  *privileged* domain for that environment. For TESTNET, that domain is
+  `testnet.salt.space`. Using the wrong domain doesn't necessarily error —
+  it can silently return `null` for secrets, or (see CloudFormation bug
+  below) connect a live service to entirely the wrong backend.
+
+## Network / chain IDs — the bug we hit
+
+- **TESTNET orchestration chain is Arbitrum Sepolia, chain ID `421614`.**
+- Arbitrum **One** (mainnet) is `42161` — do NOT use this for testnet work.
+- `INTU_NETWORK` / `INTU_*` naming is from the **old** pre-SDK-rewrite stack.
+  If you see `INTU_NETWORK` or similar in any generated config, that's a
+  signal you're looking at stale/legacy tooling, not the current SDK.
+
+### Known bug: AWS CloudFormation robo-host template (as of this session)
+
+`RoboHost.generateCloudFormationUrl()` points at
+`setup.cloudformation-x86.yaml`, which is currently miswired for testnet:
+- Hardcodes `API_URL="https://app.salt.space/api"` (the **mainnet/production**
+  domain) instead of `testnet.salt.space`.
+- Sets `ORCHESTRATION_NETWORK_ID=42161` (Arbitrum One) instead of `421614`.
+- Sets `INTU_NETWORK=arbitrum-main` — legacy naming, shouldn't be present at all.
+- Symptom: container boots, pulls `saltrobo/app:latest`, but loops forever
+  logging `Socket inactive, attempting manual reconnection...` against
+  `app.salt.space` — the API key only exists in testnet's database, so it
+  never authenticates.
+- **Flagged to Jason/Edd. Unresolved as of this session** — don't assume
+  it's fixed without checking. Verify before relying on the CloudFormation
+  path again.
+
+### What actually works for testnet robo hosting
+
+`RoboHost.generateSetupScript()` (self-hosted install script) was verified
+working end-to-end on a Hostinger VPS this session — correctly pulled
+`saltrobo/staging:latest` and connected to `testnet.salt.space` with `HTTP 200`
+on every step, no reconnect loop. If choosing between the two paths for
+testnet, this one is the currently-trustworthy default; re-verify the
+CloudFormation path only after confirming the bug above has actually been
+fixed upstream.
+
+## Org / Account structure
+
+- `createOrganisation()` → org with an owner (your EOA).
+- `createRoboHost({ name, organisationId, ownerAddress })` — one robo host
+  per org; a second call 409s. Use `getRoboHost({ organisationId })` to
+  fetch the existing one instead of re-creating.
+- `RoboHost.provisioned` — true once at least one signer has actually
+  connected. If false, `generateSetupScript`/`generateCloudFormationUrl`
+  are safe to re-run (per SDK docs).
+- **Accounts require at least 2 collaborators** on the org (owner + 1) before
+  they can be created — invite a second member first if starting fresh.
+- Largest account configuration needs up to 3 Robo Guardian signers.
+
+## Migration notes from salt-autofi
+
+- Re-check every call site that referenced INTU-specific naming/config —
+  treat `INTU_*` anywhere in the old codebase as a signal that section needs
+  rewriting against the new SDK, not a direct port.
+- Old repo may reference mainnet or a different environment entirely; don't
+  assume its network/chain constants carry over to TESTNET work here.
