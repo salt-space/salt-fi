@@ -15,10 +15,36 @@ Salt is in Beta — treat this project as subject to change.
    ```
    npm install
    ```
-3. Run in dev mode:
+3. Copy `.env.example` to `.env` and set:
+   - `PRIVATE_KEY` — a 0x-prefixed private key for an Arbitrum Sepolia EOA
+     (this is the wallet that signs the SIWE login and, if you use "Create
+     account", co-signs the account's keygen ceremony).
+   - `RPC_URL` — optional; an Arbitrum Sepolia RPC endpoint. Leave blank to
+     use viem's default public RPC for the chain.
+4. Run in dev mode:
    ```
    npm run dev
    ```
+
+## Usage
+
+`npm run dev` signs you in with SIWE (against `testnet.salt.space`, TESTNET's
+privileged domain) and drops you into an interactive menu:
+
+- **List organisations** — the organisations you're a member of, and your
+  access level in each.
+- **Manage invitations** — view pending org invitations and accept or
+  decline them.
+- **List accounts** — the Salt accounts that exist within an organisation you
+  pick.
+- **Create account** — start a new account's MPC keygen ceremony in an
+  organisation (subject to whatever access level the API enforces for your
+  membership), with live progress as co-signers join and keygen/backup
+  complete.
+
+The auth token from your first sign-in is cached in `.salt-session.json`
+(gitignored) so you don't have to re-sign a wallet message on every launch;
+it's discarded automatically and you're prompted to restart if it expires.
 
 ## Docs
 
