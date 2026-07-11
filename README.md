@@ -16,11 +16,15 @@ Salt is in Beta — treat this project as subject to change.
    npm install
    ```
 3. Copy `.env.example` to `.env` and set:
-   - `PRIVATE_KEY` — a 0x-prefixed private key for an Arbitrum Sepolia EOA
-     (this is the wallet that signs the SIWE login and, if you use "Create
-     account", co-signs the account's keygen ceremony).
-   - `RPC_URL` — optional; an Arbitrum Sepolia RPC endpoint. Leave blank to
-     use viem's default public RPC for the chain.
+   - `PRIVATE_KEY` — a 0x-prefixed private key for any EVM EOA (this is the
+     wallet that signs the SIWE login and, if you use "Create account",
+     co-signs the account's keygen ceremony). You never interact with
+     Arbitrum Sepolia directly — that's just the chain Salt uses internally
+     to orchestrate ceremonies; the accounts you create/hold assets in can
+     live on many other supported testnets.
+   - `RPC_URL` — optional; an RPC endpoint for Arbitrum Sepolia, since that's
+     the orchestration chain the SDK connects the signer to under the hood.
+     Leave blank to use viem's default public RPC for the chain.
 4. Run in dev mode:
    ```
    npm run dev

@@ -46,7 +46,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       }
     } catch (err) {
       if (err instanceof InvalidAuthToken) {
-        clearStoredSession();
+        clearStoredSession(selfAddress);
         p.log.error("Your session expired. Please restart the app to sign in again.");
         return;
       }

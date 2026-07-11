@@ -6,37 +6,39 @@ import type { SaltWalletClient } from "./wallet.js";
 const SESSION_FILE = path.resolve(process.cwd(), ".salt-session.json");
 const DOMAIN = "testnet.salt.space";
 
-interface StoredSession {
-  authToken: string;
-}
+type StoredSessions = Record<string, { authToken: string }>;
 
-function readStoredSession(): StoredSession | undefined {
+function readStoredSessions(): StoredSessions {
   try {
-    return JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8")) as StoredSession;
+    return JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8")) as StoredSessions;
   } catch {
-    return undefined;
+    return {};
   }
 }
 
-function writeStoredSession(session: StoredSession): void {
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2));
+function writeStoredSession(address: string, authToken: string): void {
+  const sessions = readStoredSessions();
+  sessions[address.toLowerCase()] = { authToken };
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(sessions, null, 2));
 }
 
-export function clearStoredSession(): void {
-  try {
-    fs.unlinkSync(SESSION_FILE);
-  } catch {
-    // nothing to clear
-  }
+export function clearStoredSession(address: string): void {
+  const sessions = readStoredSessions();
+  delete sessions[address.toLowerCase()];
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(sessions, null, 2));
 }
 
 /**
- * Reuses a cached auth token if it still verifies against the API, otherwise
- * falls back to a fresh SIWE signature via `walletClient` and caches the
- * resulting token for next time.
+ * Reuses a cached auth token for this wallet's address if it still verifies
+ * against the API, otherwise falls back to a fresh SIWE signature via
+ * `walletClient` and caches the resulting token for next time. Sessions are
+ * keyed by address so switching PRIVATE_KEY doesn't reuse another wallet's
+ * cached token.
  */
 export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
-  const stored = readStoredSession();
+  const address = walletClient.account.address.toLowerCase();
+  const stored = readStoredSessions()[address];
+
   if (stored) {
     const salt = new Salt({ environment: "TESTNET", domain: DOMAIN, authToken: stored.authToken });
     try {
@@ -44,7 +46,7 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
       return salt;
     } catch (err) {
       if (err instanceof InvalidAuthToken) {
-        clearStoredSession();
+        clearStoredSession(address);
       } else {
         throw err;
       }
@@ -53,6 +55,6 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
 
   const salt = new Salt({ environment: "TESTNET", domain: DOMAIN });
   const authToken = await salt.authenticate(walletClient);
-  writeStoredSession({ authToken });
+  writeStoredSession(address, authToken);
   return salt;
 }
