@@ -5,6 +5,7 @@ import { createOrganisationFlow } from "./commands/create-organisation.js";
 import { manageInvitations } from "./commands/invitations.js";
 import { listenForNudgesFlow } from "./commands/nudges.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
+import { policyChatFlow } from "./commands/policy-chat.js";
 import { checkRoboStatusFlow } from "./commands/robos.js";
 import { sendTransactionFlow } from "./commands/send.js";
 import { isAuthExpired } from "./errors.js";
@@ -30,6 +31,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "listen-nudges", label: "Listen for account nudges" },
         { value: "accounts", label: "List accounts" },
         { value: "send", label: "Send assets" },
+        { value: "policy-chat", label: "Policy chat" },
         { value: EXIT, label: "Exit" },
       ],
     });
@@ -70,6 +72,9 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
           break;
         case "send":
           await sendTransactionFlow(salt, walletClient);
+          break;
+        case "policy-chat":
+          await policyChatFlow(salt, walletClient);
           break;
       }
     } catch (err) {
