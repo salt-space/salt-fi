@@ -103,6 +103,17 @@ privileged domain) and drops you into an interactive menu:
   (proposed/signed/broadcast — see
   [`docs/transaction-stages.md`](docs/transaction-stages.md) for exactly
   what each stage means), and the transaction hash once broadcast.
+- **Policy chat** — a natural-language agent for reading and managing an
+  account's transaction policies (whitelists, per-transaction limits, denied
+  proposers, contract-function restrictions). Ask things like "what are my
+  policies?", "copy my whitelist to all chains", "copy account A's policies
+  onto account B", or "I'm going to trade on AAVE — what should I restrict?".
+  Every change it proposes is shown and confirmed before it's applied.
+  Requests Salt can't express yet (time-scheduled access, cumulative limits,
+  enforced approvals) are logged to
+  [`docs/requested-policies.md`](docs/requested-policies.md) for the Salt
+  team. Requires an `ANTHROPIC_API_KEY` in `.env` (this is the only feature
+  that needs one); powered by Claude via the Anthropic SDK.
 
 The auth token from your first sign-in is cached in `.salt-session.json`
 (gitignored) so you don't have to re-sign a wallet message on every launch;
