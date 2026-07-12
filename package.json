@@ -1,0 +1,25 @@
+{
+  "name": "salt-fi",
+  "version": "0.1.0",
+  "description": "Rebuild of KagamiDigital/salt-autofi on Salt's new SDK.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "dev:a": "DOTENV_CONFIG_PATH=.env.a tsx src/index.ts",
+    "dev:b": "DOTENV_CONFIG_PATH=.env.b tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0",
+    "@kagamidigital/salt-sdk-mirror": "^0.0.25",
+    "dotenv": "^17.4.2",
+    "viem": "^2.55.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

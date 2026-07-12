@@ -1,0 +1,10 @@
+.npmrc
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+.claude/settings.local.json
+.salt-session.json
+robo-setup-*.sh
