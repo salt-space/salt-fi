@@ -46,31 +46,43 @@ current docs/types before relying on anything below long-term.
   If you see `INTU_NETWORK` or similar in any generated config, that's a
   signal you're looking at stale/legacy tooling, not the current SDK.
 
-### Known bug: AWS CloudFormation robo-host template (as of this session)
+### Fixed in 0.0.27: AWS CloudFormation robo-host template
 
-`RoboHost.generateCloudFormationUrl()` points at
-`setup.cloudformation-x86.yaml`, which is currently miswired for testnet:
-- Hardcodes `API_URL="https://app.salt.space/api"` (the **mainnet/production**
-  domain) instead of `testnet.salt.space`.
-- Sets `ORCHESTRATION_NETWORK_ID=42161` (Arbitrum One) instead of `421614`.
-- Sets `INTU_NETWORK=arbitrum-main` — legacy naming, shouldn't be present at all.
-- Symptom: container boots, pulls `saltrobo/app:latest`, but loops forever
-  logging `Socket inactive, attempting manual reconnection...` against
-  `app.salt.space` — the API key only exists in testnet's database, so it
-  never authenticates.
-- **Flagged to Jason/Edd. Unresolved as of this session** — don't assume
-  it's fixed without checking. Verify before relying on the CloudFormation
-  path again.
+Previously (through SDK 0.0.26), `RoboHost.generateCloudFormationUrl()`
+pointed at a single hardcoded `setup.cloudformation-x86.yaml`, miswired for
+testnet: hardcoded `API_URL="https://app.salt.space/api"` (mainnet/production)
+instead of `testnet.salt.space`, `ORCHESTRATION_NETWORK_ID=42161` (Arbitrum
+One) instead of `421614`, and a legacy `INTU_NETWORK=arbitrum-main` that
+shouldn't have been present. Symptom: container boots, pulls
+`saltrobo/app:latest`, but loops forever logging `Socket inactive, attempting
+manual reconnection...` against `app.salt.space` — the API key only exists in
+testnet's database, so it never authenticates. Was flagged to Jason/Edd as
+unresolved.
+
+**Verified fixed as of SDK `0.0.27`** (checked by diffing 0.0.26 vs 0.0.27's
+bundled `salt.es.js` directly, then generating a real URL and fetching the
+template): `generateCloudFormationUrl()` now builds an environment-namespaced
+template URL (`https://${environment.name}-robo-signers-cloud-launch-template.s3...`,
+ties into the `EnvironmentName` enum added in 0.0.26's types) instead of one
+universal bucket. The `testnet-robo-signers-cloud-launch-template` bucket's
+`setup.cloudformation-x86.yaml` now correctly has
+`API_URL="https://testnet.salt.space/api"` and `SALT_CHAIN_ID=421614`, and no
+`INTU_NETWORK` reference at all. Re-verify with the same
+diff-then-fetch-the-template approach before trusting this on any future SDK
+bump — don't assume a fix holds across versions without checking again.
 
 ### What actually works for testnet robo hosting
 
-`RoboHost.generateSetupScript()` (self-hosted install script) was verified
-working end-to-end on a Hostinger VPS this session — correctly pulled
-`saltrobo/staging:latest` and connected to `testnet.salt.space` with `HTTP 200`
-on every step, no reconnect loop. If choosing between the two paths for
-testnet, this one is the currently-trustworthy default; re-verify the
-CloudFormation path only after confirming the bug above has actually been
-fixed upstream.
+Both paths are now viable on `0.0.27`+:
+- `RoboHost.generateSetupScript()` (self-hosted install script) — verified
+  working end-to-end on a Hostinger VPS, correctly pulled
+  `saltrobo/staging:latest` and connected to `testnet.salt.space` with
+  `HTTP 200` on every step, no reconnect loop.
+- `RoboHost.generateCloudFormationUrl()` — the bug above is fixed as of
+  0.0.27 (verified by fetching the actual template, see above), but salt-fi
+  hasn't wired this path into `create-organisation.ts` yet (it intentionally
+  only offers `generateSetupScript()` today). Re-verify end-to-end (actually
+  launch a stack) before wiring it up and defaulting users to it.
 
 ## Org / Account structure
 

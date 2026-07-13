@@ -14,7 +14,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
     "@clack/prompts": "^1.7.0",
-    "@kagamidigital/salt-sdk-mirror": "^0.0.26",
+    "@kagamidigital/salt-sdk-mirror": "^0.0.27",
     "dotenv": "^17.4.2",
     "viem": "^2.55.0"
   },
