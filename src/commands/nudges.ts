@@ -21,13 +21,29 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
     return;
   }
 
+  // Raw wire-level nudge signal — fires when a nudge arrives, before the
+  // auto-join machinery takes over. `ceremonyCompleted` (below) then reports
+  // the finished join. Between them the user sees: nudge in -> setup joined.
+  const unsubscribe = salt.subscribeToNudgeEvent((nudge) => {
+    const kind =
+      nudge.sessionType === "keygen"
+        ? "account setup"
+        : nudge.sessionType === "signing"
+          ? "transaction signing"
+          : nudge.sessionType === "sign-message"
+            ? "message signing"
+            : "ceremony";
+    const target = nudge.accountId ? ` for account ${nudge.accountId}` : "";
+    p.log.step(`Nudge received from ${nudge.from} — joining ${kind}${target}...`);
+  });
+
   listener.on("ceremonyCompleted", (result) => {
     if (result?.account) {
       p.log.success(
         `Joined account setup: ${result.account.name}  (${result.account.id})\n  address: ${result.account.evmAddress}`,
       );
     } else {
-      p.log.info("A ceremony completed, but account details weren't available to this signer.");
+      p.log.success("Joined a ceremony (account details weren't available to this signer).");
     }
   });
 
@@ -38,6 +54,7 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
   p.log.info("Listening for account-setup nudges. Leave this running while a teammate creates an account naming you as a signer.");
   await p.text({ message: "Press Enter to stop listening" });
 
+  unsubscribe();
   listener.disableNudgeListener();
   p.log.info("Stopped listening for nudges.");
 }
