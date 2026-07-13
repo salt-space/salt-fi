@@ -11,9 +11,15 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
 
   let listener;
   try {
+    // autoJoin: false + manual join() so we get the real AccountCeremony for
+    // keygen nudges — same class accounts.ts drives for the host — and can
+    // show live "N of M joined -> keygen -> backup" progress. autoJoin: true
+    // only reports one opaque completion event at the very end, so a joiner
+    // sees nothing between "nudge received" and (if it ever fires) done,
+    // which reads as the app never confirming the account was finished.
     listener = await salt.listenToAccountNudges({
       signer: walletClient,
-      autoJoin: true,
+      autoJoin: false,
       resolveAccount: true,
     });
   } catch (err) {
@@ -21,29 +27,53 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
     return;
   }
 
-  // Raw wire-level nudge signal — fires when a nudge arrives, before the
-  // auto-join machinery takes over. `ceremonyCompleted` (below) then reports
-  // the finished join. Between them the user sees: nudge in -> setup joined.
-  const unsubscribe = salt.subscribeToNudgeEvent((nudge) => {
-    const kind =
-      nudge.sessionType === "keygen"
-        ? "account setup"
-        : nudge.sessionType === "signing"
-          ? "transaction signing"
-          : nudge.sessionType === "sign-message"
-            ? "message signing"
-            : "ceremony";
-    const target = nudge.accountId ? ` for account ${nudge.accountId}` : "";
-    p.log.step(`Nudge received from ${nudge.from} — joining ${kind}${target}...`);
-  });
+  listener.on("nudgeReceived", async (event) => {
+    if (event.kind === "keygen") {
+      p.log.step(`Nudge received from ${event.nudge.from} — joining account setup...`);
+      const s = p.spinner();
+      s.start("Joining account setup ceremony");
+      try {
+        const ceremony = await event.join();
+        ceremony.on("presence", (e) => {
+          s.message(`Waiting for signers: ${e.joined}/${e.total} joined`);
+        });
+        ceremony.on("ready", () => {
+          s.message("All signers present, running keygen...");
+        });
+        ceremony.on("keygenCompleted", () => {
+          s.message("Keygen complete, backing up keyshares...");
+        });
+        ceremony.on("keyshareBackedUp", () => {
+          s.message("Keyshares backed up, finalising...");
+        });
 
-  listener.on("ceremonyCompleted", (result) => {
-    if (result?.account) {
-      p.log.success(
-        `Joined account setup: ${result.account.name}  (${result.account.id})\n  address: ${result.account.evmAddress}`,
-      );
-    } else {
-      p.log.success("Joined a ceremony (account details weren't available to this signer).");
+        const result = await ceremony.wait();
+        if (result?.account) {
+          s.stop("Account setup complete");
+          p.log.success(
+            `Joined account setup: ${result.account.name}  (${result.account.id})\n  address: ${result.account.evmAddress}`,
+          );
+        } else {
+          s.stop("Account setup complete");
+          p.log.success("Joined account setup (account details weren't available to this signer).");
+        }
+      } catch (err) {
+        s.stop("Account setup failed");
+        p.log.error(`Failed to join account setup: ${formatSaltError(err)}`);
+      }
+      return;
+    }
+
+    // Signing / sign-message ceremonies only expose wait() to a joiner — no
+    // intermediate progress events are available for these on the SDK side.
+    const kind = event.kind === "signing" ? "transaction signing" : "message signing";
+    p.log.step(`Nudge received from ${event.nudge.from} — joining ${kind}...`);
+    try {
+      const ceremony = await event.join();
+      await ceremony.wait();
+      p.log.success(`Joined and completed ${kind}.`);
+    } catch (err) {
+      p.log.error(`Failed to join ${kind}: ${formatSaltError(err)}`);
     }
   });
 
@@ -54,7 +84,6 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
   p.log.info("Listening for account-setup nudges. Leave this running while a teammate creates an account naming you as a signer.");
   await p.text({ message: "Press Enter to stop listening" });
 
-  unsubscribe();
   listener.disableNudgeListener();
   p.log.info("Stopped listening for nudges.");
 }
