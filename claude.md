@@ -79,10 +79,11 @@ Both paths are now viable on `0.0.27`+:
   `saltrobo/staging:latest` and connected to `testnet.salt.space` with
   `HTTP 200` on every step, no reconnect loop.
 - `RoboHost.generateCloudFormationUrl()` — the bug above is fixed as of
-  0.0.27 (verified by fetching the actual template, see above), but salt-fi
-  hasn't wired this path into `create-organisation.ts` yet (it intentionally
-  only offers `generateSetupScript()` today). Re-verify end-to-end (actually
-  launch a stack) before wiring it up and defaulting users to it.
+  0.0.27 (verified by fetching the actual template, see above). Wired up as
+  a second option in `create-organisation.ts`'s "Create organisation" flow.
+  No one's actually launched a stack from it end-to-end yet (only the
+  template contents and URL generation are verified) — if you hit anything
+  unexpected running it for real, that's the first thing to check.
 
 ## Org / Account structure
 

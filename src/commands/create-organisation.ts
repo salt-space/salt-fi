@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { RoboHost, Salt } from "@kagamidigital/salt-sdk-mirror";
 import { reportError } from "../errors.js";
 import type { SaltWalletClient } from "../wallet.js";
 
@@ -129,11 +129,28 @@ async function setUpRoboHost(
     return;
   }
 
-  // Only the self-hosted install script is reliable right now. The AWS
-  // CloudFormation path (RoboHost.generateCloudFormationUrl) is known-broken
-  // for TESTNET as of this session (its template hardcodes the mainnet API
-  // domain and Arbitrum One's chain ID instead of testnet's) — intentionally
-  // not wired up here. Add it once that's fixed upstream.
+  const method = await p.select({
+    message: "How do you want to set up this robo host?",
+    options: [
+      {
+        value: "script",
+        label: "Self-hosted install script",
+        hint: "run yourself on any Ubuntu/Debian box — validated end-to-end",
+      },
+      {
+        value: "cloudformation",
+        label: "AWS CloudFormation (one-click launch)",
+        hint: "opens a pre-filled AWS console URL — confirm with \"Check robo status\" once launched",
+      },
+    ],
+  });
+  if (p.isCancel(method)) return;
+
+  if (method === "cloudformation") {
+    await generateCloudFormationLink(host, organisationName, salt.userPublicKey);
+    return;
+  }
+
   let script: string;
   try {
     script = host.generateSetupScript({ publicKey: salt.userPublicKey });
@@ -155,5 +172,32 @@ async function setUpRoboHost(
       "See docs/robo-hosting/ in this repo for platform-specific walkthroughs\n" +
       "(e.g. how to do this with only a browser-based terminal, no scp).\n\n" +
       'Once it\'s running, use "Check robo status" here to confirm it connected.',
+  );
+}
+
+async function generateCloudFormationLink(host: RoboHost, organisationName: string, publicKey: string): Promise<void> {
+  const stackNameInput = await p.text({
+    message: "CloudFormation stack name",
+    defaultValue: `${slugify(organisationName)}-robos`,
+    validate: (value) => (value && !/^[a-zA-Z][a-zA-Z0-9-]*$/.test(value) ? "Letters, numbers, and hyphens only, starting with a letter" : undefined),
+  });
+  if (p.isCancel(stackNameInput)) return;
+  const stackName = stackNameInput || `${slugify(organisationName)}-robos`;
+
+  let url: string;
+  try {
+    url = host.generateCloudFormationUrl({ publicKey, stackName });
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+
+  p.log.success(
+    "Open this URL while signed into the AWS console to launch a pre-filled stack " +
+      "(installs Docker, generates and encrypts the robo's seed, and starts the container " +
+      "automatically — same setup as the self-hosted script, no server access needed):\n\n" +
+      `  ${url}\n\n` +
+      'Once the stack finishes launching, use "Check robo status" here to confirm it connected. ' +
+      "See docs/robo-hosting/aws.md for details.",
   );
 }
