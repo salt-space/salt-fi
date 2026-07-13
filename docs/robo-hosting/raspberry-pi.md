@@ -12,7 +12,7 @@ Before relying on this, worth confirming:
   build — Docker Hub images aren't always multi-arch, and this hasn't been
   checked yet.
 - Getting the script onto the Pi is simplest via `scp` if it's on your local
-  network (`scp robo-setup-<org-id>.sh pi@<pi-ip>:~`) rather than needing
+  network (`scp robo-setup-<org-name>-<org-id>.sh pi@<pi-ip>:~`) rather than needing
   the browser-terminal paste workaround from the Hostinger guide.
 
 Once someone's actually run this end-to-end on a Pi, replace this file with

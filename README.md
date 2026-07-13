@@ -54,7 +54,7 @@ privileged domain) and drops you into an interactive menu:
 
 - **Create organisation** — create a new organisation with you as owner, then
   optionally register a Robo Guardian host for it and generate a self-hosted
-  install script (`robo-setup-<org-id>.sh`, gitignored — it embeds a secret
+  install script (`robo-setup-<org-name>-<org-id>.sh`, gitignored — it embeds a secret
   API key). The script is fully automated — run it as root on any Ubuntu or
   Debian box and it installs everything it needs (Docker included) and
   starts the robo itself; check progress afterward with "Check robo

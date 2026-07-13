@@ -4,6 +4,27 @@ import type { Salt } from "@kagamidigital/salt-sdk-mirror";
 import { reportError } from "../errors.js";
 import type { SaltWalletClient } from "../wallet.js";
 
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "org";
+}
+
+/** Prepend an identifying comment header, keeping any shebang as the true first line. */
+function withOrgHeader(script: string, organisationName: string, organisationId: string, roboName: string): string {
+  const header = [
+    `# Organisation: ${organisationName} (${organisationId})`,
+    `# Robo Guardian host: ${roboName}`,
+    `# Generated: ${new Date().toISOString()}`,
+    "",
+    "",
+  ].join("\n");
+
+  const shebangMatch = script.match(/^#!.*\n/);
+  if (shebangMatch) {
+    return script.slice(0, shebangMatch[0].length) + header + script.slice(shebangMatch[0].length);
+  }
+  return header + script;
+}
+
 export async function createOrganisationFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const selfAddress = walletClient.account.address;
 
@@ -121,8 +142,8 @@ async function setUpRoboHost(
     return;
   }
 
-  const filename = `robo-setup-${organisationId}.sh`;
-  fs.writeFileSync(filename, script, { mode: 0o600 });
+  const filename = `robo-setup-${slugify(organisationName)}-${organisationId}.sh`;
+  fs.writeFileSync(filename, withOrgHeader(script, organisationName, organisationId, roboName), { mode: 0o600 });
 
   p.log.success(
     `Wrote ${filename} (contains a secret API key — already gitignored, treat it like a credential).\n\n` +

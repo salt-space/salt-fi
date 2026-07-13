@@ -6,7 +6,7 @@ Validated end-to-end on an Ubuntu Hostinger VPS.
 
 In `salt-fi`, run the app (`npm run dev`), pick **Create organisation**, and
 say yes when asked to set up Robo Guardians. You'll get a file like
-`robo-setup-<org-id>.sh` in your project folder. It embeds a secret API
+`robo-setup-<org-name>-<org-id>.sh` in your project folder. It embeds a secret API
 key — treat it like a credential (don't paste it anywhere public, delete it
 once you're done with it).
 
@@ -19,7 +19,7 @@ client needed. Open it; you should land at a `root@...#` prompt directly.
 
 If you have `scp`/SSH access set up separately, that's simplest:
 ```
-scp robo-setup-<org-id>.sh root@<vps-ip>:~
+scp robo-setup-<org-name>-<org-id>.sh root@<vps-ip>:~
 ```
 
 If you're only using the browser terminal, you need to paste the script's
