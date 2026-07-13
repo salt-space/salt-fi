@@ -103,6 +103,13 @@ privileged domain) and drops you into an interactive menu:
   (proposed/signed/broadcast — see
   [`docs/transaction-stages.md`](docs/transaction-stages.md) for exactly
   what each stage means), and the transaction hash once broadcast.
+- **Manage policies** — form-driven CRUD for an account's transaction
+  policies (whitelist / blocklist, denied proposers, per-transaction limits,
+  contract-call restrictions) across chains. List, add, edit, and delete
+  policies via guided prompts, with a few contract-restriction presets (e.g.
+  "ERC-20 transfer — only to a specific recipient") to save typing. **No API
+  key required** — this is the plain, always-available way to manage
+  policies; Policy chat below is the natural-language alternative.
 - **Policy chat** — a natural-language agent for reading and managing an
   account's transaction policies (whitelists, per-transaction limits, denied
   proposers, contract-function restrictions). Ask things like "what are my
