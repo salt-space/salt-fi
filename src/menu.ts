@@ -76,7 +76,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
           await sendTransactionFlow(salt, walletClient);
           break;
         case "manage-policies":
-          await policyManagementFlow(salt);
+          await policyManagementFlow(salt, walletClient);
           break;
         case "policy-chat":
           await policyChatFlow(salt, walletClient);

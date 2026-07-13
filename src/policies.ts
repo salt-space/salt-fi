@@ -86,15 +86,21 @@ export const CONTRACT_PRESETS: ContractPreset[] = [
   },
 ];
 
-/** Human-readable multi-line description of a policy, for lists and confirmations. */
-export function describePolicy(policy: Policy): string {
+/**
+ * Human-readable multi-line description of a policy, for lists and
+ * confirmations. `resolveLabel` is an optional fallback name lookup (by
+ * address) for recipient entries with no explicit nickname stored on the
+ * policy — e.g. a known org collaborator or another account in the org.
+ */
+export function describePolicy(policy: Policy, resolveLabel?: (address: string) => string | undefined): string {
   const header = `${POLICY_TYPE_LABEL[policy.type] ?? policy.type}  •  ${chainLabel(policy.chain)}`;
   const lines: string[] = [];
   const params = policy.params as Record<string, unknown>;
 
   if (Array.isArray(params.recipients)) {
     for (const r of params.recipients as { address: string; nickname?: string }[]) {
-      lines.push(`  ${r.nickname ? `${r.nickname} — ` : ""}${r.address}`);
+      const label = r.nickname || resolveLabel?.(r.address);
+      lines.push(`  ${label ? `${label} — ` : ""}${r.address}`);
     }
   } else if (Array.isArray(params.limits)) {
     for (const l of params.limits as { address: string; amount: string }[]) {
