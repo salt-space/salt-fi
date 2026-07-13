@@ -33,7 +33,7 @@ export async function listOrganisations(salt: Salt, selfAddress: string): Promis
     for (const org of organisations) {
       const self = org.members.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
       const role = self ? (ACCESS_LEVEL_LABEL[self.accessLevel] ?? String(self.accessLevel)) : "unknown";
-      p.log.message(`${org.name}  (${org._id})\n  your role: ${role}  •  members: ${org.members.length}`);
+      p.log.message(`${org.name}  (${org._id})\n  your role: ${role}  •  collaborators: ${org.members.length}`);
     }
   } catch (err) {
     s.stop("Failed to fetch organisations");
