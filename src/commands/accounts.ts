@@ -83,6 +83,7 @@ export async function createAccountFlow(salt: Salt, walletClient: SaltWalletClie
 
   const s = p.spinner();
   s.start("Starting account creation ceremony");
+  let renudge: ReturnType<typeof setInterval> | undefined;
   try {
     const ceremony = await salt.createAccount({
       name,
@@ -91,11 +92,14 @@ export async function createAccountFlow(salt: Salt, walletClient: SaltWalletClie
       signer: walletClient,
     });
 
+    let allPresent = false;
     ceremony.on("presence", (event) => {
+      allPresent = event.joined === event.total;
       s.message(`Waiting for signers: ${event.joined}/${event.total} joined`);
       p.log.message(renderSignerList(event.signers, selfAddress, memberNameByAddress));
     });
     ceremony.on("ready", () => {
+      allPresent = true;
       s.message("All signers present, running keygen...");
     });
     ceremony.on("keygenCompleted", () => {
@@ -105,11 +109,30 @@ export async function createAccountFlow(salt: Salt, walletClient: SaltWalletClie
       s.message("Keyshares backed up, finalising...");
     });
 
+    // The initial createAccount fires one nudge. Re-nudge periodically so a
+    // signer or robo that wasn't listening at kickoff — and starts listening
+    // late — still gets pulled into the huddle. nudge() with no args targets
+    // exactly the not-yet-present signers (host excluded); once everyone's in,
+    // allPresent flips and we stop.
+    renudge = setInterval(() => {
+      if (allPresent) return;
+      try {
+        const nudged = ceremony.nudge();
+        if (nudged.length > 0) {
+          p.log.info(`Re-nudging ${nudged.length} signer(s) not yet joined...`);
+        }
+      } catch {
+        // transient — the next tick will retry
+      }
+    }, 15_000);
+
     const { account } = await ceremony.wait();
     s.stop("Account created");
     p.log.success(`${account.name}  (${account.id})\n  address: ${account.evmAddress}\n  public key: ${account.publicKey}`);
   } catch (err) {
     s.stop("Account creation failed");
     reportError(err);
+  } finally {
+    if (renudge) clearInterval(renudge);
   }
 }
