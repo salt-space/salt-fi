@@ -94,6 +94,14 @@ privileged domain) and drops you into an interactive menu:
   in a terminal while you wait; press Enter to stop.
 - **List accounts** — the Salt accounts that exist within an organisation you
   pick.
+- **Get testnet funds** — a helper for topping up an account (or your own
+  signing wallet) with test ETH from Alchemy's faucets on any of the four
+  supported testnets. Pick the target and network and it prints the right
+  Alchemy faucet URL and the address to paste, and can open it in your
+  browser. It can't dispense funds itself — Alchemy has no faucet API, and
+  their anti-bot check requires the wallet you connect to have a little ETH
+  and real activity on Ethereum mainnet — so this just streamlines the manual
+  step.
 - **Send assets** — send a mainstream asset (native currency, or a
   well-known token like USDC/USDT/DAI/WETH/WBTC — a curated allowlist rather
   than every balance an aggregator reports, to keep out spam/airdrop tokens)
