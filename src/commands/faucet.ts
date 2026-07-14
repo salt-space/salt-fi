@@ -5,14 +5,18 @@ import { reportError } from "../errors.js";
 import { pickOrganisation } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
-// Alchemy's testnet faucet pages (verified to resolve) for the chains this app
-// works with. Alchemy has no public faucet API, so the app can't dispense
-// funds itself — it just hands the user the right URL + the address to paste.
-const ALCHEMY_FAUCETS: { chainName: string; url: string }[] = [
-  { chainName: "Ethereum Sepolia", url: "https://www.alchemy.com/faucets/ethereum-sepolia" },
-  { chainName: "Arbitrum Sepolia", url: "https://www.alchemy.com/faucets/arbitrum-sepolia" },
-  { chainName: "Base Sepolia", url: "https://www.alchemy.com/faucets/base-sepolia" },
-  { chainName: "Polygon Amoy", url: "https://www.alchemy.com/faucets/polygon-amoy" },
+// Web faucets that fund brand-new addresses with NO Ethereum-mainnet balance or
+// history requirement — the point being to top up freshly-created Salt accounts.
+// (Alchemy and Chainlink native drips both gate on mainnet reputation, which a
+// fresh MPC account can't satisfy, so they're deliberately not used here.)
+//   - Circle drips USDC + native gas; one page, pick the chain there.
+//   - Google Cloud drips native testnet ETH, per-chain URLs.
+const CIRCLE_FAUCET = "https://faucet.circle.com/";
+const GOOGLE_FAUCET_BY_CHAIN: { chainName: string; url: string }[] = [
+  { chainName: "Ethereum Sepolia", url: "https://cloud.google.com/application/web3/faucet/ethereum/sepolia" },
+  { chainName: "Arbitrum Sepolia", url: "https://cloud.google.com/application/web3/faucet/arbitrum/sepolia" },
+  { chainName: "Base Sepolia", url: "https://cloud.google.com/application/web3/faucet/base/sepolia" },
+  { chainName: "Polygon Amoy", url: "https://cloud.google.com/application/web3/faucet/polygon/amoy" },
 ];
 
 /** Best-effort open a URL in the user's default browser; silent if it fails (the URL is printed anyway). */
@@ -47,24 +51,33 @@ export async function faucetFlow(salt: Salt, walletClient: SaltWalletClient): Pr
   if (p.isCancel(target)) return;
   const address = target === SELF ? selfAddress : (usable.find((account) => account.id === target)?.evmAddress as string);
 
-  const faucetIndex = await p.select({
+  const chainIndex = await p.select({
     message: "Which testnet?",
-    options: ALCHEMY_FAUCETS.map((faucet, index) => ({ value: index, label: faucet.chainName })),
+    options: GOOGLE_FAUCET_BY_CHAIN.map((chain, index) => ({ value: index, label: chain.chainName })),
   });
-  if (p.isCancel(faucetIndex)) return;
-  const faucet = ALCHEMY_FAUCETS[faucetIndex];
+  if (p.isCancel(chainIndex)) return;
+  const chain = GOOGLE_FAUCET_BY_CHAIN[chainIndex];
 
-  p.note(`Address to fund:\n  ${address}\n\nAlchemy faucet:\n  ${faucet.url}`, `Get ${faucet.chainName} testnet funds`);
+  p.note(
+    `Address to fund:\n  ${address}\n\n` +
+      `USDC + native gas — Circle:\n  ${CIRCLE_FAUCET}\n  (select ${chain.chainName} on the page)\n\n` +
+      `Native gas only — Google Cloud:\n  ${chain.url}`,
+    `Fund on ${chain.chainName}`,
+  );
   p.log.info(
-    "Alchemy has no faucet API, so this can't be automated from here — open the URL, connect a wallet, and paste the " +
-      "address above to receive ~0.1 test ETH.\nHeads-up: Alchemy requires the wallet you connect to hold a little ETH " +
-      "and have real activity on Ethereum mainnet (an anti-bot check), so a brand-new wallet may be turned away.",
+    "Both of these fund brand-new accounts — no Ethereum-mainnet balance or history required. Open a faucet, paste the " +
+      "address above, and request. (Circle also gives testnet USDC, handy for trying Send/Swap.)",
   );
 
-  const open = await p.confirm({ message: "Open the faucet in your browser now?" });
-  if (p.isCancel(open)) return;
-  if (open) {
-    openInBrowser(faucet.url);
-    p.log.step("Opened the faucet in your default browser (paste the address above).");
-  }
+  const open = await p.select({
+    message: "Open a faucet in your browser?",
+    options: [
+      { value: "circle", label: "Circle (USDC + native gas)" },
+      { value: "google", label: "Google Cloud (native gas only)" },
+      { value: "none", label: "No — I'll copy the links above" },
+    ],
+  });
+  if (p.isCancel(open) || open === "none") return;
+  openInBrowser(open === "circle" ? CIRCLE_FAUCET : chain.url);
+  p.log.step("Opened the faucet in your default browser — paste the address above.");
 }

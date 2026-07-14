@@ -95,13 +95,15 @@ privileged domain) and drops you into an interactive menu:
 - **List accounts** — the Salt accounts that exist within an organisation you
   pick.
 - **Get testnet funds** — a helper for topping up an account (or your own
-  signing wallet) with test ETH from Alchemy's faucets on any of the four
-  supported testnets. Pick the target and network and it prints the right
-  Alchemy faucet URL and the address to paste, and can open it in your
-  browser. It can't dispense funds itself — Alchemy has no faucet API, and
-  their anti-bot check requires the wallet you connect to have a little ETH
-  and real activity on Ethereum mainnet — so this just streamlines the manual
-  step.
+  signing wallet) with test funds on any of the four supported testnets. Pick
+  the target and network and it prints (and can open) the right faucet URLs
+  plus the address to paste: **Circle** (testnet USDC + native gas) and
+  **Google Cloud** (native gas). Both fund brand-new accounts with **no
+  Ethereum-mainnet balance or history required** — unlike Alchemy/Chainlink,
+  whose anti-bot gates a freshly-created MPC account can't pass. It streamlines
+  the manual browser step rather than dispensing funds itself (Circle has a
+  programmatic drip API, but that needs a verified Circle API key — a possible
+  future upgrade).
 - **Send assets** — send a mainstream asset (native currency, or a
   well-known token like USDC/USDT/DAI/WETH/WBTC — a curated allowlist rather
   than every balance an aggregator reports, to keep out spam/airdrop tokens)
