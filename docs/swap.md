@@ -40,12 +40,16 @@ and the sell token being approved must be on the whitelist. If they aren't:
 - **If you're an organisation owner**, the flow offers to add the missing
   addresses to the whitelist inline, then re-checks and continues.
 - **If you're not an owner**, it lists the exact addresses an owner needs to
-  whitelist (via "Manage policies" → the allowed-recipients policy), then
-  stops so you don't burn a ceremony on a swap that would be rejected.
+  whitelist (via "Manage policies" → the allowed-recipients policy).
+
+Whenever a breach can't be (or isn't) resolved, the flow doesn't hard-stop —
+it warns that the swap will very likely be rejected (a Robo Guardian refuses
+to sign on a policy breach) and lets you choose to try it anyway or back out.
 
 Other blocking policies (per-transaction limits, contract-call restrictions,
-denied proposers) are surfaced but can't be resolved from this flow — an owner
-adjusts them via "Manage policies".
+denied proposers) are surfaced too; they can't be resolved from this flow (an
+owner adjusts them via "Manage policies"), but the same "proceed anyway"
+choice applies.
 
 ## Scope (v1)
 

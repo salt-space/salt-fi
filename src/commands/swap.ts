@@ -108,13 +108,30 @@ function dedupeById(policies: Policy[]): Policy[] {
 }
 
 /**
+ * Outcome of the pre-swap policy check:
+ * - `clear`   — no breach (or an owner fixed the whitelist); ask the normal confirm.
+ * - `proceed` — breach, but the user opted to submit anyway (already an explicit
+ *               go-ahead, so skip the redundant confirm).
+ * - `abort`   — cancelled; don't submit.
+ */
+type PolicyDecision = "clear" | "proceed" | "abort";
+
+/** Offer to submit despite a policy breach — the swap will very likely be rejected. */
+async function promptProceedAnyway(): Promise<PolicyDecision> {
+  const anyway = await p.confirm({
+    message: "Try the swap anyway? It will very likely be rejected — a Robo Guardian refuses to sign on a policy breach.",
+    initialValue: false,
+  });
+  return !p.isCancel(anyway) && anyway === true ? "proceed" : "abort";
+}
+
+/**
  * Run Salt's policy check against each transaction the swap will submit and
  * surface the results. Salt evaluates each call's `to` against the account's
  * policies, so the common blocker is an allowed-recipients whitelist that
  * doesn't include the Uniswap router (and/or the sell token being approved).
- * An owner can add the missing addresses inline; a non-owner is told to ask
- * one. Returns true if the swap is clear to submit, false if it would be
- * rejected.
+ * An owner can add the missing addresses inline; anyone else can proceed and
+ * see it fail. See {@link PolicyDecision} for the outcomes.
  */
 async function resolveSwapPolicies(
   salt: Salt,
@@ -123,7 +140,7 @@ async function resolveSwapPolicies(
   chainId: string,
   isOwner: boolean,
   txs: SwapTx[],
-): Promise<boolean> {
+): Promise<PolicyDecision> {
   const runChecks = async () => {
     const nonce = await salt.getAccountNonce(accountId, Number(chainId));
     const out: { tx: SwapTx; check: Awaited<ReturnType<Salt["runPoliciesCheck"]>> }[] = [];
@@ -146,7 +163,7 @@ async function resolveSwapPolicies(
     results = await runChecks();
   } catch (err) {
     p.log.warn(`Couldn't check account policies (${(err as Error).message}). Proceeding without a policy check.`);
-    return true;
+    return "clear";
   }
 
   // Surface every policy that applies to this swap, with a pass/fail mark.
@@ -160,7 +177,7 @@ async function resolveSwapPolicies(
   }
 
   const rejected = dedupeById(results.flatMap((r) => r.check.rejectedPolicies));
-  if (rejected.length === 0) return true;
+  if (rejected.length === 0) return "clear";
 
   // Blockers other than the whitelist can't be auto-resolved here.
   const nonWhitelist = rejected.filter((pol) => pol.type !== "allowed_recipients");
@@ -170,7 +187,7 @@ async function resolveSwapPolicies(
         nonWhitelist.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n") +
         '\nAn owner can adjust these via "Manage policies".',
     );
-    return false;
+    return promptProceedAnyway();
   }
 
   // Only allowed-recipients blocks remain. A rejected tx's `to` is the address
@@ -200,11 +217,12 @@ async function resolveSwapPolicies(
       "You're not an owner of this organisation, so you can't change the whitelist. Ask an owner to add the " +
         'addresses above ("Manage policies" → the allowed-recipients policy), then run the swap again.',
     );
-    return false;
+    return promptProceedAnyway();
   }
 
   const addNow = await p.confirm({ message: "You're an owner — add these to the whitelist now?" });
-  if (p.isCancel(addNow) || !addNow) return false;
+  if (p.isCancel(addNow)) return "abort";
+  if (!addNow) return promptProceedAnyway();
 
   const s = p.spinner();
   s.start("Updating whitelist");
@@ -221,7 +239,7 @@ async function resolveSwapPolicies(
   } catch (err) {
     s.stop("Failed to update whitelist");
     p.log.error(formatSaltError(err));
-    return false;
+    return promptProceedAnyway();
   }
 
   // Re-check to confirm the swap is now allowed (e.g. in case another policy also applies).
@@ -233,13 +251,13 @@ async function resolveSwapPolicies(
         "Still blocked after the whitelist update:\n" +
           stillRejected.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
       );
-      return false;
+      return promptProceedAnyway();
     }
   } catch {
     // Whitelist was updated; if the re-check errors, let the submit be the source of truth.
   }
   p.log.success("Whitelist updated — the swap is now allowed.");
-  return true;
+  return "clear";
 }
 
 export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
@@ -484,12 +502,15 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
 
   // Check the swap against the account's policies (whitelist, limits, contract
   // restrictions, denied proposers). Surfaces what applies; an owner can add a
-  // missing whitelist entry inline. Bails out if the swap would be rejected.
-  const clear = await resolveSwapPolicies(salt, accountId, selfAddress, chainId, isOwner, txs);
-  if (!clear) return;
-
-  const confirmed = await p.confirm({ message: "Execute this swap?" });
-  if (p.isCancel(confirmed) || !confirmed) return;
+  // missing whitelist entry inline; otherwise the user can proceed and see it
+  // fail (the "proceed anyway" prompt is itself the go-ahead, so skip the
+  // normal confirm in that case).
+  const decision = await resolveSwapPolicies(salt, accountId, selfAddress, chainId, isOwner, txs);
+  if (decision === "abort") return;
+  if (decision === "clear") {
+    const confirmed = await p.confirm({ message: "Execute this swap?" });
+    if (p.isCancel(confirmed) || !confirmed) return;
+  }
 
   const submitBase = {
     accountId,
