@@ -27,6 +27,26 @@ and Robo Guardians nudged automatically), exactly like "Send assets".
    the swap ceremony (`SwapRouter02.exactInputSingle`). The bought tokens land
    back in the same account.
 
+## Policy checks
+
+Before executing, the flow runs Salt's policy check (`runPoliciesCheck`)
+against each transaction it will submit (the `approve` and the swap) and shows
+which of the account's policies apply, with a ✓/✗ for each.
+
+The common blocker is an **allowed-recipients whitelist**: Salt evaluates each
+call's target address against it, so both the Uniswap router (the swap target)
+and the sell token being approved must be on the whitelist. If they aren't:
+
+- **If you're an organisation owner**, the flow offers to add the missing
+  addresses to the whitelist inline, then re-checks and continues.
+- **If you're not an owner**, it lists the exact addresses an owner needs to
+  whitelist (via "Manage policies" → the allowed-recipients policy), then
+  stops so you don't burn a ceremony on a swap that would be rejected.
+
+Other blocking policies (per-transaction limits, contract-call restrictions,
+denied proposers) are surfaced but can't be resolved from this flow — an owner
+adjusts them via "Manage policies".
+
 ## Scope (v1)
 
 - **ERC-20 → ERC-20 only.** To swap the chain's native currency, wrap it to

@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Policy, Salt } from "@kagamidigital/salt-sdk-mirror";
 import {
   type Address,
   createPublicClient,
@@ -10,7 +10,8 @@ import {
   WaitForTransactionReceiptTimeoutError,
 } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID } from "../chains.js";
-import { reportError } from "../errors.js";
+import { formatSaltError, reportError } from "../errors.js";
+import { POLICY_TYPE_LABEL } from "../policies.js";
 import { pickOrganisation } from "../prompts.js";
 import {
   encodeApprove,
@@ -86,6 +87,161 @@ async function submitAndTrack(salt: Salt, params: SubmitParams, label: string): 
   }
 }
 
+/** A transaction the swap will submit, with the label to whitelist if a policy blocks its `to`. */
+interface SwapTx {
+  label: string;
+  to: Address;
+  data: `0x${string}`;
+  whitelistNickname: string;
+}
+
+function dedupeById(policies: Policy[]): Policy[] {
+  const seen = new Set<string>();
+  const out: Policy[] = [];
+  for (const pol of policies) {
+    if (!seen.has(pol.id)) {
+      seen.add(pol.id);
+      out.push(pol);
+    }
+  }
+  return out;
+}
+
+/**
+ * Run Salt's policy check against each transaction the swap will submit and
+ * surface the results. Salt evaluates each call's `to` against the account's
+ * policies, so the common blocker is an allowed-recipients whitelist that
+ * doesn't include the Uniswap router (and/or the sell token being approved).
+ * An owner can add the missing addresses inline; a non-owner is told to ask
+ * one. Returns true if the swap is clear to submit, false if it would be
+ * rejected.
+ */
+async function resolveSwapPolicies(
+  salt: Salt,
+  accountId: string,
+  selfAddress: string,
+  chainId: string,
+  isOwner: boolean,
+  txs: SwapTx[],
+): Promise<boolean> {
+  const runChecks = async () => {
+    const nonce = await salt.getAccountNonce(accountId, Number(chainId));
+    const out: { tx: SwapTx; check: Awaited<ReturnType<Salt["runPoliciesCheck"]>> }[] = [];
+    for (const tx of txs) {
+      const check = await salt.runPoliciesCheck(accountId, {
+        nonce,
+        amount: "0",
+        from: selfAddress,
+        to: tx.to,
+        network: chainId,
+        data: tx.data,
+      });
+      out.push({ tx, check });
+    }
+    return out;
+  };
+
+  let results;
+  try {
+    results = await runChecks();
+  } catch (err) {
+    p.log.warn(`Couldn't check account policies (${(err as Error).message}). Proceeding without a policy check.`);
+    return true;
+  }
+
+  // Surface every policy that applies to this swap, with a pass/fail mark.
+  const rejectedIds = new Set(results.flatMap((r) => r.check.rejectedPolicies.map((pol) => pol.id)));
+  const applicable = dedupeById(results.flatMap((r) => r.check.networkPolicies));
+  if (applicable.length > 0) {
+    p.note(
+      applicable.map((pol) => `${rejectedIds.has(pol.id) ? "✗" : "✓"} ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
+      "Account policies that apply to this swap",
+    );
+  }
+
+  const rejected = dedupeById(results.flatMap((r) => r.check.rejectedPolicies));
+  if (rejected.length === 0) return true;
+
+  // Blockers other than the whitelist can't be auto-resolved here.
+  const nonWhitelist = rejected.filter((pol) => pol.type !== "allowed_recipients");
+  if (nonWhitelist.length > 0) {
+    p.log.error(
+      "This swap is blocked by policies that can't be resolved here:\n" +
+        nonWhitelist.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n") +
+        '\nAn owner can adjust these via "Manage policies".',
+    );
+    return false;
+  }
+
+  // Only allowed-recipients blocks remain. A rejected tx's `to` is the address
+  // that whitelist is missing — collect them per blocking policy.
+  const fixes = new Map<string, { policy: Policy; additions: { address: string; nickname: string }[] }>();
+  for (const { tx, check } of results) {
+    for (const pol of check.rejectedPolicies) {
+      if (pol.type !== "allowed_recipients") continue;
+      const entry = fixes.get(pol.id) ?? { policy: pol, additions: [] };
+      if (!entry.additions.some((a) => a.address.toLowerCase() === tx.to.toLowerCase())) {
+        entry.additions.push({ address: tx.to, nickname: tx.whitelistNickname });
+      }
+      fixes.set(pol.id, entry);
+    }
+  }
+
+  const neededList = [
+    ...new Set([...fixes.values()].flatMap((f) => f.additions.map((a) => `${a.nickname} (${a.address})`))),
+  ];
+  p.log.warn(
+    "This account has an allowed-recipients whitelist, and this swap needs these addresses on it:\n" +
+      neededList.map((x) => `  • ${x}`).join("\n"),
+  );
+
+  if (!isOwner) {
+    p.log.info(
+      "You're not an owner of this organisation, so you can't change the whitelist. Ask an owner to add the " +
+        'addresses above ("Manage policies" → the allowed-recipients policy), then run the swap again.',
+    );
+    return false;
+  }
+
+  const addNow = await p.confirm({ message: "You're an owner — add these to the whitelist now?" });
+  if (p.isCancel(addNow) || !addNow) return false;
+
+  const s = p.spinner();
+  s.start("Updating whitelist");
+  try {
+    for (const { policy, additions } of fixes.values()) {
+      const existing = (policy.params as { recipients?: { address: string; nickname?: string }[] }).recipients ?? [];
+      const merged = [...existing];
+      for (const add of additions) {
+        if (!merged.some((r) => r.address.toLowerCase() === add.address.toLowerCase())) merged.push(add);
+      }
+      await salt.updateAccountPolicy(policy.id, { recipients: merged });
+    }
+    s.stop("Whitelist updated");
+  } catch (err) {
+    s.stop("Failed to update whitelist");
+    p.log.error(formatSaltError(err));
+    return false;
+  }
+
+  // Re-check to confirm the swap is now allowed (e.g. in case another policy also applies).
+  try {
+    const recheck = await runChecks();
+    const stillRejected = dedupeById(recheck.flatMap((r) => r.check.rejectedPolicies));
+    if (stillRejected.length > 0) {
+      p.log.error(
+        "Still blocked after the whitelist update:\n" +
+          stillRejected.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
+      );
+      return false;
+    }
+  } catch {
+    // Whitelist was updated; if the re-check errors, let the submit be the source of truth.
+  }
+  p.log.success("Whitelist updated — the swap is now allowed.");
+  return true;
+}
+
 export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const choice = await p.select({
     message: "Which kind of swap?",
@@ -112,12 +268,19 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   if (!organisationId) return;
 
   let accounts;
+  let organisation;
   try {
-    accounts = await salt.getAccounts(organisationId);
+    [accounts, { organisation }] = await Promise.all([
+      salt.getAccounts(organisationId),
+      salt.getOrganisationById(organisationId),
+    ]);
   } catch (err) {
     reportError(err);
     return;
   }
+
+  const isOwner =
+    organisation.members.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase())?.accessLevel === 1;
 
   const eligibleAccounts = accounts.filter(
     (account) =>
@@ -247,8 +410,9 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   const amountIn = parseUnits(amountInput, sellToken.decimals);
 
   const slippageInput = await p.text({
-    message: "Max slippage %",
+    message: "Max slippage % (0.5 suggested for most pairs; raise it for thin/volatile pools)",
     defaultValue: "0.5",
+    placeholder: "0.5",
     validate: (v) => {
       if (v && Number.isNaN(Number(v))) return "Enter a number, e.g. 0.5";
       if (v && (Number(v) < 0 || Number(v) >= 100)) return "Must be between 0 and 100";
@@ -285,6 +449,45 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
       `  min received (after ${slippageInput || "0.5"}% slippage): ${formatUnits(amountOutMinimum, buyDecimals)} ${buySymbol}`,
     "Fast swap",
   );
+  // Build the calldata + figure out whether an approval is needed, so the
+  // policy check below evaluates the exact transactions we'll submit.
+  const approveData = encodeApprove(deployment.swapRouter02, amountIn);
+  const swapData = encodeExactInputSingle({
+    tokenIn: sellAddress,
+    tokenOut: buyAddress,
+    fee: quote.fee,
+    recipient: accountAddress,
+    amountIn,
+    amountOutMinimum,
+  });
+
+  let approveNeeded: boolean;
+  try {
+    const allowance = await publicClient.readContract({
+      address: sellAddress,
+      abi: ERC20_ABI,
+      functionName: "allowance",
+      args: [accountAddress, deployment.swapRouter02],
+    });
+    approveNeeded = allowance < amountIn;
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+
+  const txs: SwapTx[] = [
+    ...(approveNeeded
+      ? [{ label: `Approve ${sellToken.symbol}`, to: sellAddress, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
+      : []),
+    { label: "Swap", to: deployment.swapRouter02, data: swapData, whitelistNickname: "Uniswap SwapRouter02" },
+  ];
+
+  // Check the swap against the account's policies (whitelist, limits, contract
+  // restrictions, denied proposers). Surfaces what applies; an owner can add a
+  // missing whitelist entry inline. Bails out if the swap would be rejected.
+  const clear = await resolveSwapPolicies(salt, accountId, selfAddress, chainId, isOwner, txs);
+  if (!clear) return;
+
   const confirmed = await p.confirm({ message: "Execute this swap?" });
   if (p.isCancel(confirmed) || !confirmed) return;
 
@@ -298,31 +501,12 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   };
 
   try {
-    // Approve the router for exactly amountIn if the current allowance is short.
-    const allowance = await publicClient.readContract({
-      address: sellAddress,
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [accountAddress, deployment.swapRouter02],
-    });
-    if (allowance < amountIn) {
-      await submitAndTrack(
-        salt,
-        { ...submitBase, to: sellAddress, data: encodeApprove(deployment.swapRouter02, amountIn) },
-        `Approving ${sellToken.symbol}`,
-      );
+    if (approveNeeded) {
+      await submitAndTrack(salt, { ...submitBase, to: sellAddress, data: approveData }, `Approving ${sellToken.symbol}`);
     } else {
       p.log.step(`${sellToken.symbol} already approved — skipping approval.`);
     }
 
-    const swapData = encodeExactInputSingle({
-      tokenIn: sellAddress,
-      tokenOut: buyAddress,
-      fee: quote.fee,
-      recipient: accountAddress,
-      amountIn,
-      amountOutMinimum,
-    });
     const hash = await submitAndTrack(salt, { ...submitBase, to: deployment.swapRouter02, data: swapData }, "Swapping");
 
     p.log.success(
