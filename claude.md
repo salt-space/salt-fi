@@ -31,12 +31,17 @@ current docs/types before relying on anything below long-term.
   via a viem `walletClient`; Salt verifies and issues a session token scoped
   to a **domain**.
 - Constructor: `new Salt({ environment: 'TESTNET', domain: 'testnet.salt.space' })`
-- **Domain matters a lot**: Robo Guardian configuration (API keys, seed
-  material) is only returned to sessions authenticated against Salt's
+- **Domain matters a lot**: Robo Guardian configuration (the robo credential,
+  seed material) is only returned to sessions authenticated against Salt's
   *privileged* domain for that environment. For TESTNET, that domain is
   `testnet.salt.space`. Using the wrong domain doesn't necessarily error —
   it can silently return `null` for secrets, or (see CloudFormation bug
   below) connect a live service to entirely the wrong backend.
+- **Terminology**: the robo credential is surfaced to users as an **OTP
+  (one-time password)** in this app's copy and docs. The SDK and the
+  CloudFormation template still call it `apiKey` / `param_ApiKey`, so keep
+  those literal names when describing SDK/template internals — the rename is
+  user-facing copy only, until Salt changes it upstream.
 
 ## Network / chain IDs — the bug we hit
 
@@ -55,9 +60,9 @@ instead of `testnet.salt.space`, `ORCHESTRATION_NETWORK_ID=42161` (Arbitrum
 One) instead of `421614`, and a legacy `INTU_NETWORK=arbitrum-main` that
 shouldn't have been present. Symptom: container boots, pulls
 `saltrobo/app:latest`, but loops forever logging `Socket inactive, attempting
-manual reconnection...` against `app.salt.space` — the API key only exists in
-testnet's database, so it never authenticates. Was flagged to Jason/Edd as
-unresolved.
+manual reconnection...` against `app.salt.space` — the OTP (`param_ApiKey`)
+only exists in testnet's database, so it never authenticates. Was flagged to
+Jason/Edd as unresolved.
 
 **Verified fixed as of SDK `0.0.27`** (checked by diffing 0.0.26 vs 0.0.27's
 bundled `salt.es.js` directly, then generating a real URL and fetching the
@@ -79,10 +84,11 @@ Both paths are now viable on `0.0.27`+:
   `saltrobo/staging:latest` and connected to `testnet.salt.space` with
   `HTTP 200` on every step, no reconnect loop.
 - `RoboHost.generateCloudFormationUrl()` — the bug above is fixed as of
-  0.0.27 (verified by fetching the actual template, see above), but salt-fi
-  hasn't wired this path into `create-organisation.ts` yet (it intentionally
-  only offers `generateSetupScript()` today). Re-verify end-to-end (actually
-  launch a stack) before wiring it up and defaulting users to it.
+  0.0.27 (verified by fetching the actual template, see above). Wired up as
+  a second option in `create-organisation.ts`'s "Create organisation" flow.
+  No one's actually launched a stack from it end-to-end yet (only the
+  template contents and URL generation are verified) — if you hit anything
+  unexpected running it for real, that's the first thing to check.
 
 ## Org / Account structure
 

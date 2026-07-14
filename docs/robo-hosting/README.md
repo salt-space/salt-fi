@@ -1,11 +1,13 @@
 # Hosting a Robo Guardian
 
-"Create organisation" in the app can generate a self-hosted install script
-(`RoboHost.generateSetupScript()`) for your organisation's Robo Guardians.
-**You don't need to install anything yourself first** — the script is a
-single file that, run as root on any Ubuntu or Debian machine, installs
-Docker, Python, and everything else it needs, generates and encrypts the
-robo's seed, and starts the container. You just need a box to run it on.
+"Create organisation" in the app can set up your organisation's Robo
+Guardians one of two ways: a self-hosted install script
+(`RoboHost.generateSetupScript()`) or an AWS CloudFormation one-click launch
+URL (`RoboHost.generateCloudFormationUrl()`). **Either way you don't need to
+install anything yourself first** — both paths install Docker, Python, and
+everything else needed, generate and encrypt the robo's seed, and start the
+container automatically. The self-hosted script just needs a box to run it
+on (root shell); CloudFormation needs nothing beyond an AWS console login.
 
 That box can be almost anything — a VPS, a spare machine on your desk, a
 cloud instance. This folder collects platform-specific guides, since the
@@ -21,12 +23,11 @@ validate them.
   is Debian-based, which is all the script requires), but not yet validated,
   and it's worth confirming the `saltrobo/staging` Docker image actually
   ships an arm64/armhf build before relying on it.
-- **[AWS](aws.md)** — the SDK's built-in one-click path
-  (`RoboHost.generateCloudFormationUrl()`) is currently broken for TESTNET
-  (see the root `claude.md`) and intentionally not wired up in this app.
-  The self-hosted script still works fine on a plain EC2 instance today —
-  see the AWS guide for what that looks like without the CloudFormation
-  convenience.
+- **[AWS](aws.md)** — the SDK's built-in one-click CloudFormation path, fixed
+  for TESTNET as of SDK `0.0.27` (see the root `claude.md`) and now wired up
+  as an option in "Create organisation". Template contents verified correct;
+  no one's launched a real stack from it yet in this app. The self-hosted
+  script also works fine on a plain EC2 instance if you'd rather not use it.
 
 More guides will be added here as we validate other hosts. If you set one
 up somewhere not listed, a PR adding a guide for it is welcome.

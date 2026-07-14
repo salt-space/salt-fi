@@ -53,14 +53,17 @@ entry.
 privileged domain) and drops you into an interactive menu:
 
 - **Create organisation** — create a new organisation with you as owner, then
-  optionally register a Robo Guardian host for it and generate a self-hosted
-  install script (`robo-setup-<org-name>-<org-id>.sh`, gitignored — it embeds a secret
-  API key). The script is fully automated — run it as root on any Ubuntu or
-  Debian box and it installs everything it needs (Docker included) and
-  starts the robo itself; check progress afterward with "Check robo
-  guardians". See [`docs/robo-hosting/`](docs/robo-hosting/README.md) for
-  platform-specific walkthroughs (Hostinger validated end-to-end; more to
-  come).
+  optionally register a Robo Guardian host for it and choose how to set it
+  up: a self-hosted install script (`robo-setup-<org-name>-<org-id>.sh`,
+  gitignored — it embeds a secret OTP / one-time password), fully automated — run it as root
+  on any Ubuntu or Debian box and it installs everything it needs (Docker
+  included) and starts the robo itself — or an AWS CloudFormation URL that
+  launches a pre-filled stack doing the same thing with no server access
+  needed. Either way, check progress afterward with "Check robo guardians".
+  See [`docs/robo-hosting/`](docs/robo-hosting/README.md) for platform-specific
+  walkthroughs (Hostinger validated end-to-end; the AWS template's contents
+  are verified correct for testnet, but no one's launched a real stack from
+  it yet — more to come).
 - **Invite collaborators** — invite another EVM address into an organisation
   you pick, with a role label and access level (owner/member/agent). Only
   organisation owners can actually do this — the API enforces it.
