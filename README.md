@@ -55,7 +55,7 @@ privileged domain) and drops you into an interactive menu:
 - **Create organisation** — create a new organisation with you as owner, then
   optionally register a Robo Guardian host for it and choose how to set it
   up: a self-hosted install script (`robo-setup-<org-name>-<org-id>.sh`,
-  gitignored — it embeds a secret API key), fully automated — run it as root
+  gitignored — it embeds a secret OTP / one-time password), fully automated — run it as root
   on any Ubuntu or Debian box and it installs everything it needs (Docker
   included) and starts the robo itself — or an AWS CloudFormation URL that
   launches a pre-filled stack doing the same thing with no server access

@@ -7,6 +7,27 @@ launches a pre-filled stack that installs Docker, generates and encrypts
 the robo's seed, and starts the container automatically — no server access
 needed at all.
 
+### If the link just lands you on the empty CloudFormation page
+
+The generated URL is an AWS deep link: everything that pre-fills the stack
+(template, stack name, parameters) lives in the URL's `#...` fragment. AWS
+**only keeps that fragment if the console is already loaded in the
+`us-east-1` (N. Virginia) region.** If opening the link makes AWS switch
+region or refresh your sign-in first, it silently drops the fragment and
+you end up on the bare CloudFormation console — even though you're logged
+in. This is an AWS behaviour, not a problem with the link itself.
+
+Two ways around it:
+
+1. **Load us-east-1 first.** Open CloudFormation, switch the region selector
+   to *N. Virginia (us-east-1)*, let it finish loading, then paste the URL
+   into that same tab.
+2. **Create the stack by hand.** Create stack → With new resources → *Amazon
+   S3 URL*, paste the template URL, and fill the parameters. The app prints
+   the exact template URL, region, and parameter values alongside the link
+   for this purpose. (The parameter AWS labels `ApiKey` is the robo's OTP /
+   one-time password — a secret; treat it like a password.)
+
 This was broken for TESTNET through SDK `0.0.26` — `generateCloudFormationUrl()`
 pointed at a template hardcoding the mainnet API domain (`app.salt.space`)
 and Arbitrum One's chain ID (`42161`) instead of TESTNET's

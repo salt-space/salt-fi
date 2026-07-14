@@ -163,7 +163,7 @@ async function setUpRoboHost(
   fs.writeFileSync(filename, withOrgHeader(script, organisationName, organisationId, roboName), { mode: 0o600 });
 
   p.log.success(
-    `Wrote ${filename} (contains a secret API key — already gitignored, treat it like a credential).\n\n` +
+    `Wrote ${filename} (contains a secret OTP / one-time password — already gitignored, treat it like a credential).\n\n` +
       "This is a one-shot, fully automated script — you don't need to install\n" +
       "Docker or anything else yourself first. Just get it onto whatever\n" +
       "machine will run your Robo Guardians (a VPS, a spare box, a cloud\n" +
@@ -173,6 +173,29 @@ async function setUpRoboHost(
       "(e.g. how to do this with only a browser-based terminal, no scp).\n\n" +
       'Once it\'s running, use "Check robo status" here to confirm it connected.',
   );
+}
+
+/** Pull the region, template URL, and stack parameters back out of the SDK's generated URL. */
+function parseCloudFormationUrl(url: string): { region?: string; templateUrl?: string; params: Record<string, string> } {
+  const params: Record<string, string> = {};
+  let region: string | undefined;
+  let templateUrl: string | undefined;
+  try {
+    const parsed = new URL(url);
+    region = parsed.searchParams.get("region") ?? undefined;
+    // The quick-create bits live in the fragment: #/stacks/quickcreate?templateURL=...&param_X=Y
+    const q = parsed.hash.indexOf("?");
+    if (q >= 0) {
+      const frag = new URLSearchParams(parsed.hash.slice(q + 1));
+      templateUrl = frag.get("templateURL") ?? frag.get("templateUrl") ?? undefined;
+      for (const [key, value] of frag) {
+        if (key.startsWith("param_")) params[key.slice("param_".length)] = value;
+      }
+    }
+  } catch {
+    // Non-fatal — the URL itself is still printed for the user.
+  }
+  return { region, templateUrl, params };
 }
 
 async function generateCloudFormationLink(host: RoboHost, organisationName: string, publicKey: string): Promise<void> {
@@ -192,12 +215,30 @@ async function generateCloudFormationLink(host: RoboHost, organisationName: stri
     return;
   }
 
+  const { region, templateUrl, params } = parseCloudFormationUrl(url);
+  const manualLines: string[] = [];
+  if (region) manualLines.push(`  Region:        ${region}`);
+  if (templateUrl) manualLines.push(`  Template URL:  ${templateUrl}`);
+  for (const [name, value] of Object.entries(params)) {
+    manualLines.push(`  ${`${name}:`.padEnd(13)}${value}`);
+  }
+
   p.log.success(
-    "Open this URL while signed into the AWS console to launch a pre-filled stack " +
-      "(installs Docker, generates and encrypts the robo's seed, and starts the container " +
-      "automatically — same setup as the self-hosted script, no server access needed):\n\n" +
+    "AWS CloudFormation — one-click launch\n\n" +
+      "Open this URL while signed into the AWS console to launch a pre-filled stack\n" +
+      "(installs Docker, generates and encrypts the robo's seed, and starts the\n" +
+      "container automatically — no server access needed):\n\n" +
       `  ${url}\n\n` +
-      'Once the stack finishes launching, use "Check robo status" here to confirm it connected. ' +
-      "See docs/robo-hosting/aws.md for details.",
+      "IMPORTANT: this is an AWS deep link, and AWS only keeps the pre-filled values\n" +
+      "if your console is already loaded in the us-east-1 (N. Virginia) region. If it\n" +
+      "has to switch region or refresh your sign-in first, it silently drops them and\n" +
+      "leaves you on the empty CloudFormation page. If that happens, either open\n" +
+      "CloudFormation in us-east-1 first and re-paste the URL, or create the stack by\n" +
+      "hand (Create stack → With new resources → Amazon S3 URL) with these values:\n\n" +
+      `${manualLines.join("\n")}\n\n` +
+      'The "ApiKey" parameter above is the robo\'s OTP (one-time password) — a secret,\n' +
+      "treat it like a password. (Salt's console still labels this field \"ApiKey\" for now.)\n\n" +
+      'Once the stack finishes launching, use "Check robo status" here to confirm it\n' +
+      "connected. See docs/robo-hosting/aws.md for details.",
   );
 }
