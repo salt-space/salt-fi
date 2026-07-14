@@ -106,6 +106,14 @@ privileged domain) and drops you into an interactive menu:
   (proposed/signed/broadcast — see
   [`docs/transaction-stages.md`](docs/transaction-stages.md) for exactly
   what each stage means), and the transaction hash once broadcast.
+- **Swap assets** — swap one of the account's ERC-20 tokens for another. Two
+  paths: **Fast swap** (Uniswap v3 — an immediate on-chain swap, no API key)
+  and **Slow swap** (Turbine — coming soon). Fast swap quotes across Uniswap's
+  fee tiers, picks the best, then runs the `approve` and the swap as MPC
+  ceremonies from the account itself. Uniswap v3 is deployed on Sepolia, so
+  unlike a mainnet-only aggregator this works on testnet today (e.g. USDC ↔
+  WETH). ERC-20 → ERC-20 only for now (wrap native first). See
+  [`docs/swap.md`](docs/swap.md).
 - **Manage policies** — form-driven CRUD for an account's transaction
   policies (whitelist / blocklist, denied proposers, per-transaction limits,
   contract-call restrictions) across chains. List, add, edit, and delete
