@@ -4,7 +4,7 @@ import { buildTransferTransaction, TransferType } from "@kagamidigital/salt-sdk-
 import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
-import { pickOrganisation } from "../prompts.js";
+import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
@@ -66,7 +66,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     return;
   }
 
-  const accountId = await p.select({
+  const accountId = await select({
     message: "Send from which account?",
     options: eligibleAccounts.map((account) => ({
       value: account.id,
@@ -99,7 +99,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     return;
   }
 
-  const tokenIndex = await p.select({
+  const tokenIndex = await select({
     message: "Send which asset?",
     options: sendable.map((token, index) => ({
       value: index,
@@ -148,7 +148,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
   let recipientLabel: string | undefined;
 
   if (otherAccountsInOrg.length > 0) {
-    const recipientChoice = await p.select({
+    const recipientChoice = await select({
       message: "Recipient",
       options: [
         ...otherAccountsInOrg.map((account) => ({

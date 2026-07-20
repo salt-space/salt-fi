@@ -1,8 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "@kagamidigital/salt-sdk-mirror";
 import { reportError } from "../errors.js";
-
-const BACK = "__back" as const;
+import { select } from "../prompts.js";
 
 export async function manageInvitations(salt: Salt): Promise<void> {
   const s = p.spinner();
@@ -23,30 +22,26 @@ export async function manageInvitations(salt: Salt): Promise<void> {
     return;
   }
 
-  const invitationId = await p.select({
+  const invitationId = await select({
     message: "Select an invitation",
-    options: [
-      ...invitations.map((inv) => ({
-        value: inv._id,
-        label: `Organisation ${inv.organisation_id}`,
-        hint: `access level ${inv.accessLevel}`,
-      })),
-      { value: BACK, label: "Back" },
-    ],
+    options: invitations.map((inv) => ({
+      value: inv._id,
+      label: `Organisation ${inv.organisation_id}`,
+      hint: `access level ${inv.accessLevel}`,
+    })),
   });
 
-  if (p.isCancel(invitationId) || invitationId === BACK) return;
+  if (p.isCancel(invitationId)) return;
 
-  const action = await p.select({
+  const action = await select({
     message: "What would you like to do?",
     options: [
       { value: "accept", label: "Accept" },
       { value: "decline", label: "Decline" },
-      { value: BACK, label: "Back" },
     ],
   });
 
-  if (p.isCancel(action) || action === BACK) return;
+  if (p.isCancel(action)) return;
 
   const s2 = p.spinner();
   try {
