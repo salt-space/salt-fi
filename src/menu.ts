@@ -35,7 +35,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "create-account", label: "Create account" },
         { value: "listen-nudges", label: "Listen for account nudges" },
         { value: "accounts", label: "List accounts" },
-        { value: "faucet", label: "Get testnet funds" },
+        { value: "faucet", label: "Faucet for Salt accounts" },
         { value: "send", label: "Send assets" },
         { value: "swap", label: "Swap assets" },
         { value: "manage-policies", label: "Manage policies" },
@@ -79,7 +79,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
           await listAccounts(salt);
           break;
         case "faucet":
-          await faucetFlow(salt, walletClient);
+          await faucetFlow(salt);
           break;
         case "send":
           await sendTransactionFlow(salt, walletClient);
