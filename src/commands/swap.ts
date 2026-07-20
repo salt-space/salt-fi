@@ -12,7 +12,7 @@ import {
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID } from "../chains.js";
 import { formatSaltError, reportError } from "../errors.js";
 import { POLICY_TYPE_LABEL } from "../policies.js";
-import { pickOrganisation } from "../prompts.js";
+import { pickOrganisation, select } from "../prompts.js";
 import {
   encodeApprove,
   encodeExactInputSingle,
@@ -261,15 +261,14 @@ async function resolveSwapPolicies(
 }
 
 export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
-  const choice = await p.select({
+  const choice = await select({
     message: "Which kind of swap?",
     options: [
       { value: "fast", label: "Fast swap (Uniswap v3)", hint: "immediate on-chain swap via the account" },
       { value: "slow", label: "Slow swap (Turbine)", hint: "coming soon" },
-      { value: "__back", label: "Back" },
     ],
   });
-  if (p.isCancel(choice) || choice === "__back") return;
+  if (p.isCancel(choice)) return;
 
   if (choice === "slow") {
     p.log.info("Slow swap (Turbine) is coming soon — it's pending a testnet endpoint from the Turbine team.");
@@ -310,7 +309,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
     return;
   }
 
-  const accountId = await p.select({
+  const accountId = await select({
     message: "Swap from which account?",
     options: eligibleAccounts.map((account) => ({ value: account.id, label: account.name, hint: account.evmAddress })),
   });
@@ -318,7 +317,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   const account = eligibleAccounts.find((a) => a.id === accountId)!;
   const accountAddress = account.evmAddress as Address;
 
-  const chainId = await p.select({
+  const chainId = await select({
     message: "On which chain?",
     options: Object.keys(UNISWAP_V3_BY_CHAIN).map((id) => ({ value: id, label: CHAIN_NAME_BY_ID[id] ?? id })),
   });
@@ -354,7 +353,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
     return;
   }
 
-  const sellIndex = await p.select({
+  const sellIndex = await select({
     message: "Swap which asset?",
     options: sellable.map((token, index) => ({
       value: index,
@@ -370,7 +369,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   // --- buy token (curated list for the chain, minus the sell token, or manual) ---
   const MANUAL = "__manual";
   const known = (KNOWN_TOKENS_BY_CHAIN[chainId] ?? []).filter((t) => t.address.toLowerCase() !== sellAddress.toLowerCase());
-  const buyChoice = await p.select({
+  const buyChoice = await select({
     message: "Swap into which asset?",
     options: [
       ...known.map((t) => ({ value: t.address as string, label: t.symbol, hint: t.address })),

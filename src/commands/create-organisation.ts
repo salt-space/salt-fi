@@ -2,6 +2,7 @@ import fs from "node:fs";
 import * as p from "@clack/prompts";
 import type { RoboHost, Salt } from "@kagamidigital/salt-sdk-mirror";
 import { reportError } from "../errors.js";
+import { select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 function slugify(name: string): string {
@@ -129,7 +130,7 @@ async function setUpRoboHost(
     return;
   }
 
-  const method = await p.select({
+  const method = await select({
     message: "How do you want to set up this robo host?",
     options: [
       {

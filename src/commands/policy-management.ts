@@ -14,7 +14,7 @@ import {
   describePolicy,
   policyChainOptions,
 } from "../policies.js";
-import { pickOrganisation } from "../prompts.js";
+import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 type CreatableType = Exclude<PolicyType, "nominated_approvers">;
@@ -79,7 +79,7 @@ async function buildLimits(
       if (!more) return entries;
     }
 
-    const kind = await p.select({
+    const kind = await select({
       message: "What is the limit on?",
       options: [
         { value: "native", label: "Native currency (ETH/MATIC)" },
@@ -135,7 +135,7 @@ async function buildRestrictions(
       if (!more) return entries;
     }
 
-    const presetChoice = await p.select({
+    const presetChoice = await select({
       message: "Restriction template",
       options: [
         ...CONTRACT_PRESETS.map((preset, i) => ({ value: String(i), label: preset.label })),
@@ -178,7 +178,7 @@ async function buildRestrictions(
       validate: (v) => (!v || !/^\d+$/.test(v) ? "Enter a whole number" : undefined),
     });
     if (p.isCancel(paramIndex)) return CANCEL;
-    const operator = await p.select({ message: "Operator", options: [...POLICY_OPERATORS] });
+    const operator = await select({ message: "Operator", options: [...POLICY_OPERATORS] });
     if (p.isCancel(operator)) return CANCEL;
     const value = await p.text({
       message: "Value the argument is compared against",
@@ -214,19 +214,16 @@ async function addPolicy(salt: Salt, accountId: string, organisationId: string, 
 
   while (params === undefined) {
     if (type === undefined) {
-      const choice = await p.select({
+      const choice = await select({
         message: "Policy type",
-        options: [
-          ...CREATABLE_POLICY_TYPES.map((t) => ({ value: t.value as string, label: t.label, hint: t.hint })),
-          { value: BACK, label: "← Back" },
-        ],
+        options: CREATABLE_POLICY_TYPES.map((t) => ({ value: t.value as string, label: t.label, hint: t.hint })),
       });
-      if (p.isCancel(choice) || choice === BACK) return;
+      if (p.isCancel(choice)) return;
       type = choice as CreatableType;
     }
 
     if (chain === undefined) {
-      const choice = await p.select({
+      const choice = await select({
         message: "Which chain does this policy apply to?",
         options: [...policyChainOptions(), { value: BACK, label: "← Back (change type)" }],
       });
@@ -307,7 +304,7 @@ async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveL
         : "No entries — add at least one, or cancel.",
     );
 
-    const action = await p.select({
+    const action = await select({
       message: "Edit policy",
       options: [
         { value: ADD, label: "Add entries" },
@@ -382,7 +379,7 @@ async function deletePolicy(salt: Salt, policy: Policy, resolveLabel: ResolveLab
 }
 
 async function pickPolicy(policies: Policy[], message: string): Promise<Policy | undefined> {
-  const choice = await p.select({
+  const choice = await select({
     message,
     options: policies.map((policy) => ({
       value: policy.id,
@@ -435,7 +432,7 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
     p.log.info("You have view-only access to policies — adding, editing, and deleting are owner-only.");
   }
 
-  const accountId = await p.select({
+  const accountId = await select({
     message: "Manage policies for which account?",
     options: usableAccounts.map((a) => ({ value: a.id, label: a.name, hint: a.evmAddress })),
   });
@@ -456,20 +453,20 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
       for (const policy of policies) p.log.message(describePolicy(policy, resolveLabel));
     }
 
-    const action = await p.select({
-      message: "Policy actions",
-      options: [
-        ...(canEdit ? [{ value: "add", label: "Add policy" }] : []),
-        ...(canEdit && policies.length > 0
-          ? [
-              { value: "edit", label: "Edit policy" },
-              { value: "delete", label: "Delete policy" },
-            ]
-          : []),
-        { value: BACK, label: "Back" },
-      ],
-    });
-    if (p.isCancel(action) || action === BACK) return;
+    const actionOptions = [
+      ...(canEdit ? [{ value: "add", label: "Add policy" }] : []),
+      ...(canEdit && policies.length > 0
+        ? [
+            { value: "edit", label: "Edit policy" },
+            { value: "delete", label: "Delete policy" },
+          ]
+        : []),
+    ];
+    // Nothing to do here (view-only account with no policies) — nothing to pick from.
+    if (actionOptions.length === 0) return;
+
+    const action = await select({ message: "Policy actions", options: actionOptions });
+    if (p.isCancel(action)) return;
 
     if (action === "add") {
       await addPolicy(salt, accountId, organisationId, resolveLabel);
