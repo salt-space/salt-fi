@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "@kagamidigital/salt-sdk-mirror";
 import { createAccountFlow, listAccounts } from "./commands/accounts.js";
 import { createOrganisationFlow } from "./commands/create-organisation.js";
+import { faucetFlow } from "./commands/faucet.js";
 import { manageInvitations } from "./commands/invitations.js";
 import { listenForNudgesFlow } from "./commands/nudges.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
@@ -34,6 +35,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "create-account", label: "Create account" },
         { value: "listen-nudges", label: "Listen for account nudges" },
         { value: "accounts", label: "List accounts" },
+        { value: "faucet", label: "Faucet for Salt accounts" },
         { value: "send", label: "Send assets" },
         { value: "swap", label: "Swap assets" },
         { value: "manage-policies", label: "Manage policies" },
@@ -75,6 +77,9 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
           break;
         case "accounts":
           await listAccounts(salt);
+          break;
+        case "faucet":
+          await faucetFlow(salt);
           break;
         case "send":
           await sendTransactionFlow(salt, walletClient);

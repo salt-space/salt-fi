@@ -94,6 +94,14 @@ privileged domain) and drops you into an interactive menu:
   in a terminal while you wait; press Enter to stop.
 - **List accounts** — the Salt accounts that exist within an organisation you
   pick.
+- **Faucet for Salt accounts** — top up a Salt account with test funds on any
+  of the four supported testnets (only fully set-up accounts are offered as
+  targets, not your signing wallet). Pick the account and network; it prints
+  and can open the account's address alongside **Circle** (the chain's gas
+  token — ETH, or POL on Amoy — plus testnet USDC) and **Google Cloud** (gas
+  token only). Both work for brand-new accounts with no prior mainnet
+  history, unlike Alchemy or Chainlink's faucets. Circle also has a
+  programmatic drip API — a future upgrade once we have a verified API key.
 - **Send assets** — send a mainstream asset (native currency, or a
   well-known token like USDC/USDT/DAI/WETH/WBTC — a curated allowlist rather
   than every balance an aggregator reports, to keep out spam/airdrop tokens)
