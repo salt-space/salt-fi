@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import { styleText } from "node:util";
 import { reportError } from "./errors.js";
 
 export const ACCESS_LEVEL_LABEL: Record<number, string> = {
@@ -12,12 +13,15 @@ export const ACCESS_LEVEL_LABEL: Record<number, string> = {
 /**
  * Wraps @clack/prompts' select to consistently note that Esc cancels/steps
  * back out of it — so individual menus don't need an explicit "Back" option
- * just to communicate that. Pass `escHint` to override the wording where Esc
- * does something other than "go back" (e.g. the main menu, where it exits).
+ * just to communicate that. Rendered as a second, dimmed message line (clack
+ * auto-prefixes every message line with its own bar glyph — see
+ * wrapTextWithPrefix — so this reads like part of its own hint styling rather
+ * than bolted onto the question). Pass `escAction` to describe what Esc does
+ * here when it's not "go back" (e.g. the main menu, where it exits).
  */
-export function select<Value>(opts: p.SelectOptions<Value> & { escHint?: string }): Promise<Value | symbol> {
-  const { escHint = "Esc to go back", ...rest } = opts;
-  return p.select({ ...rest, message: `${opts.message} (${escHint})` });
+export function select<Value>(opts: p.SelectOptions<Value> & { escAction?: string }): Promise<Value | symbol> {
+  const { escAction = "go back", ...rest } = opts;
+  return p.select({ ...rest, message: `${opts.message}\n${styleText("dim", `Esc: ${escAction}`)}` });
 }
 
 export async function pickOrganisation(salt: Salt, message: string): Promise<string | undefined> {
