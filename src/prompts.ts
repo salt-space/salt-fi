@@ -9,6 +9,17 @@ export const ACCESS_LEVEL_LABEL: Record<number, string> = {
   4: "member (no permissions)",
 };
 
+/**
+ * Wraps @clack/prompts' select to consistently note that Esc cancels/steps
+ * back out of it — so individual menus don't need an explicit "Back" option
+ * just to communicate that. Pass `escHint` to override the wording where Esc
+ * does something other than "go back" (e.g. the main menu, where it exits).
+ */
+export function select<Value>(opts: p.SelectOptions<Value> & { escHint?: string }): Promise<Value | symbol> {
+  const { escHint = "Esc to go back", ...rest } = opts;
+  return p.select({ ...rest, message: `${opts.message} (${escHint})` });
+}
+
 export async function pickOrganisation(salt: Salt, message: string): Promise<string | undefined> {
   let organisations;
   try {
@@ -23,7 +34,7 @@ export async function pickOrganisation(salt: Salt, message: string): Promise<str
     return undefined;
   }
 
-  const organisationId = await p.select({
+  const organisationId = await select({
     message,
     options: organisations.map((org) => ({ value: org._id, label: org.name })),
   });

@@ -11,6 +11,7 @@ import { checkRoboStatusFlow } from "./commands/robos.js";
 import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
 import { isAuthExpired } from "./errors.js";
+import { select } from "./prompts.js";
 import { clearStoredSession } from "./session.js";
 import type { SaltWalletClient } from "./wallet.js";
 
@@ -20,8 +21,9 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
   const selfAddress = walletClient.account.address;
 
   while (true) {
-    const choice = await p.select({
+    const choice = await select({
       message: "What would you like to do?",
+      escHint: "Esc also exits",
       options: [
         { value: "create-org", label: "Create organisation" },
         { value: "invite-member", label: "Invite collaborators" },

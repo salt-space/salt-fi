@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "@kagamidigital/salt-sdk-mirror";
 import { reportError } from "../errors.js";
-import { ACCESS_LEVEL_LABEL, pickOrganisation } from "../prompts.js";
+import { ACCESS_LEVEL_LABEL, pickOrganisation, select } from "../prompts.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
@@ -65,7 +65,7 @@ export async function inviteMemberFlow(salt: Salt): Promise<void> {
   });
   if (p.isCancel(role)) return;
 
-  const accessLevel = await p.select({
+  const accessLevel = await select({
     message: "Access level",
     initialValue: "member" as const,
     options: ACCESS_LEVEL_OPTIONS,
@@ -105,7 +105,7 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
     return;
   }
 
-  const memberAddress = await p.select({
+  const memberAddress = await select({
     message: "Edit which collaborator?",
     options: organisation.members.map((member) => ({
       value: member.address,
@@ -131,7 +131,7 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
   });
   if (p.isCancel(role)) return;
 
-  const accessLevel = await p.select({
+  const accessLevel = await select({
     message: "Access level",
     initialValue: ACCESS_ROLE_BY_LEVEL[member.accessLevel] ?? "member",
     options: ACCESS_LEVEL_OPTIONS,
