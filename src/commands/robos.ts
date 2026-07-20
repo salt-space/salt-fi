@@ -3,8 +3,9 @@ import type { Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { pickOrganisation } from "../prompts.js";
 
-export async function checkRoboStatusFlow(salt: Salt): Promise<void> {
-  const organisationId = await pickOrganisation(salt, "Check robo status for which organisation?");
+/** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
+export async function checkRoboStatusFlow(salt: Salt, preselectedOrganisationId?: string): Promise<void> {
+  const organisationId = preselectedOrganisationId ?? (await pickOrganisation(salt, "Check robo status for which organisation?"));
   if (!organisationId) return;
 
   const s = p.spinner();

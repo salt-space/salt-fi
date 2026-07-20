@@ -10,6 +10,8 @@ import {
   POLICY_OPERATORS,
   POLICY_TYPE_LABEL,
   RECIPIENT_TYPES,
+  type ResolveLabel,
+  buildResolveLabel,
   chainLabel,
   describePolicy,
   policyChainOptions,
@@ -18,8 +20,6 @@ import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 type CreatableType = Exclude<PolicyType, "nominated_approvers">;
-/** Fallback name lookup for addresses with no nickname stored on the policy itself. */
-type ResolveLabel = (address: string) => string | undefined;
 type RecipientEntry = { address: string; nickname?: string };
 type LimitEntry = { address: string; amount: string };
 type Restriction = {
@@ -205,7 +205,13 @@ async function buildParams(type: CreatableType): Promise<Record<string, unknown>
 
 const BACK = "__back";
 
-async function addPolicy(salt: Salt, accountId: string, organisationId: string, resolveLabel: ResolveLabel): Promise<void> {
+/** Exported so the getting-started wizard can walk a user through their first policy directly. */
+export async function addPolicy(
+  salt: Salt,
+  accountId: string,
+  organisationId: string,
+  resolveLabel: ResolveLabel,
+): Promise<void> {
   // Step through type -> chain -> params, letting the user back up a step
   // (or return to the actions menu) at each select rather than only Esc.
   let type: CreatableType | undefined;
@@ -412,13 +418,7 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
     return;
   }
 
-  // Fallback labels for recipient addresses with no policy-level nickname —
-  // e.g. an unlabeled whitelist entry that's actually another account in this
-  // org, or a collaborator's own signing address.
-  const addressLabel = new Map<string, string>();
-  for (const a of accounts) if (a.evmAddress) addressLabel.set(a.evmAddress.toLowerCase(), a.name);
-  for (const m of organisation.members) if (m.name) addressLabel.set(m.address.toLowerCase(), m.name);
-  const resolveLabel: ResolveLabel = (address) => addressLabel.get(address.toLowerCase());
+  const resolveLabel = buildResolveLabel(accounts, organisation.members);
 
   // Per Salt's access levels (owner/member/agent/member-no-permissions), only
   // an owner may add/edit/delete policies — member and agent are view-only.

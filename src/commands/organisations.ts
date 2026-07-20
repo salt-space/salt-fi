@@ -41,8 +41,9 @@ export async function listOrganisations(salt: Salt, selfAddress: string): Promis
   }
 }
 
-export async function inviteMemberFlow(salt: Salt): Promise<void> {
-  const organisationId = await pickOrganisation(salt, "Invite a member to which organisation?");
+/** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
+export async function inviteMemberFlow(salt: Salt, preselectedOrganisationId?: string): Promise<void> {
+  const organisationId = preselectedOrganisationId ?? (await pickOrganisation(salt, "Invite a member to which organisation?"));
   if (!organisationId) return;
 
   const address = await p.text({

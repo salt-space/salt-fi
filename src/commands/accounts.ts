@@ -28,8 +28,13 @@ export async function listAccounts(salt: Salt): Promise<void> {
   }
 }
 
-export async function createAccountFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
-  const organisationId = await pickOrganisation(salt, "Create an account in which organisation?");
+/** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
+export async function createAccountFlow(
+  salt: Salt,
+  walletClient: SaltWalletClient,
+  preselectedOrganisationId?: string,
+): Promise<void> {
+  const organisationId = preselectedOrganisationId ?? (await pickOrganisation(salt, "Create an account in which organisation?"));
   if (!organisationId) return;
 
   const selfAddress = walletClient.account.address;
