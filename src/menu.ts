@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
 import { createAccountFlow, listAccounts } from "./commands/accounts.js";
 import { createOrganisationFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";

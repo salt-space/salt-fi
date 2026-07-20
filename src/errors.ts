@@ -10,7 +10,7 @@ import {
   SocketConnectError,
   ValidationError,
   WrongChain,
-} from "@kagamidigital/salt-sdk-mirror";
+} from "salt-sdk";
 
 /**
  * Whether `err` means the current session's token is expired/rejected and a

@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, select } from "../prompts.js";
 

@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages";
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "../chains.js";
 import { formatSaltError } from "../errors.js";
 import { pickOrganisation } from "../prompts.js";

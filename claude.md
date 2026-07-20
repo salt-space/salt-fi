@@ -6,22 +6,29 @@ current docs/types before relying on anything below long-term.
 
 ## The SDK itself
 
-- **Real package**: `@kagamidigital/salt-sdk-mirror`, scoped, distributed via
-  **GitHub Packages** — NOT public npm. A public npm package literally named
-  `salt-sdk` exists and is unrelated/unaffiliated; do not install it.
-- Install requires a `.npmrc` with a GitHub PAT (`read:packages` scope) and
-  being added as an external collaborator on the `salt-sdk-mirror` repo.
-  ```
-  @kagamidigital:registry=https://npm.pkg.github.com
-  //npm.pkg.github.com/:_authToken=YOUR_CLASSIC_PAT
-  ```
-  `.npmrc` contains a real credential once the token is in it — gitignore it.
+- **Real package**: [`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on
+  **public npm** — plain `npm install`, no auth needed. This is a change as of
+  2026-07-20: the SDK previously lived only at the scoped, GitHub-Packages-only
+  `@kagamidigital/salt-sdk-mirror` (requiring a `.npmrc` with a GitHub PAT and
+  external-collaborator access) — that scoped package is now superseded by this
+  one and salt-fi has migrated off it. `.npmrc`/`.npmrc.example` were removed;
+  if either resurfaces, that's stale.
+  - **Historical note, now resolved**: a public npm package literally named
+    `salt-sdk` used to exist and was unrelated/unaffiliated with Salt — that
+    was the reason for avoiding it before. The current `salt-sdk` package is
+    the real one: verified via its npm registry maintainer (`team@salt.space`),
+    publication through npm's Trusted Publisher / GitHub Actions OIDC
+    mechanism, and a byte-identical type-definition diff against the last
+    known-good `@kagamidigital/salt-sdk-mirror@0.0.28`. Don't assume any given
+    npm package name is safe just because it "sounds right" — re-verify
+    ownership/provenance the same way before trusting a similar situation
+    again.
 - Docs: https://kagamidigital.github.io/docs/
 - TypeDoc/API reference: https://kagamidigital.github.io/salt-sdk-mirror/
+  (still hosted under the old org name as of this writing)
 - When published docs and the installed package's actual type definitions
   disagree, trust the type definitions — this is beta software and docs can
-  lag behind. Read `node_modules/@kagamidigital/salt-sdk-mirror` directly
-  when in doubt.
+  lag behind. Read `node_modules/salt-sdk` directly when in doubt.
 - Requires `"type": "module"` in package.json — the SDK ships with top-level
   `await` in an ESM file, which breaks under CJS-default Node resolution.
 

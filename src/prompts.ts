@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
 import { styleText } from "node:util";
 import { reportError } from "./errors.js";
 

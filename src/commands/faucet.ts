@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID } from "../chains.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";

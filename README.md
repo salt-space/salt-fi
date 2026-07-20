@@ -1,19 +1,16 @@
 # salt-fi
 
-A mini terminal app to get started using Salt's new SDK (`@kagamidigital/salt-sdk-mirror`).
+A mini terminal app to get started using Salt's new SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
 
 Salt is in Beta — treat this project as subject to change.
 
 ## Setup
 
-1. Copy `.npmrc.example` to `.npmrc` and add a GitHub PAT with `read:packages`
-   scope (you must be a collaborator on `salt-sdk-mirror` to install
-   the package, request access from @tamlyn10).
-2. Install dependencies:
+1. Install dependencies:
    ```
    npm install
    ```
-3. Copy `.env.example` to `.env` and set:
+2. Copy `.env.example` to `.env` and set:
    - `PRIVATE_KEY` — a 0x-prefixed private key for any EVM EOA (this is the
      wallet that signs the SIWE login and, if you use "Create account",
      co-signs the account's keygen ceremony). You never interact with
@@ -23,7 +20,7 @@ Salt is in Beta — treat this project as subject to change.
    - `RPC_URL` — optional; an RPC endpoint for Arbitrum Sepolia, since that's
      the orchestration chain the SDK connects the signer to under the hood.
      Leave blank to use viem's default public RPC for the chain.
-4. Run in dev mode:
+3. Run in dev mode:
    ```
    npm run dev
    ```

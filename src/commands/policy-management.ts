@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { DuplicatePolicyError, type Policy, type PolicyType, type Salt } from "@kagamidigital/salt-sdk-mirror";
+import { DuplicatePolicyError, type Policy, type PolicyType, type Salt } from "salt-sdk";
 import { parseUnits } from "viem";
 import { formatSaltError } from "../errors.js";
 import {

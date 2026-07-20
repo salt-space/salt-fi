@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Salt } from "@kagamidigital/salt-sdk-mirror";
+import { Salt } from "salt-sdk";
 import { isAuthExpired } from "./errors.js";
 import type { SaltWalletClient } from "./wallet.js";
 

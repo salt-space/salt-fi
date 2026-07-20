@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import * as p from "@clack/prompts";
-import type { RoboHost, Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { RoboHost, Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";

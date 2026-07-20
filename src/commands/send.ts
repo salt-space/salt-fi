@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "@kagamidigital/salt-sdk-mirror";
-import { buildTransferTransaction, TransferType } from "@kagamidigital/salt-sdk-mirror";
+import type { Salt } from "salt-sdk";
+import { buildTransferTransaction, TransferType } from "salt-sdk";
 import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";

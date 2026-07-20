@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Policy, Salt } from "@kagamidigital/salt-sdk-mirror";
+import type { Policy, Salt } from "salt-sdk";
 import {
   type Address,
   createPublicClient,

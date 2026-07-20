@@ -1,5 +1,5 @@
 import { formatUnits } from "viem";
-import type { ContractParamRestrictionOperator, Policy, PolicyType } from "@kagamidigital/salt-sdk-mirror";
+import type { ContractParamRestrictionOperator, Policy, PolicyType } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "./chains.js";
 
 export const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
