@@ -23,7 +23,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
   while (true) {
     const choice = await select({
       message: "What would you like to do?",
-      escAction: "also exits",
+      escAction: "exit",
       options: [
         { value: "create-org", label: "Create organisation" },
         { value: "invite-member", label: "Invite collaborators" },
