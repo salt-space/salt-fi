@@ -47,7 +47,18 @@ entry.
 ## Usage
 
 `npm run dev` signs you in with SIWE (against `testnet.salt.space`, TESTNET's
-privileged domain) and drops you into an interactive menu:
+privileged domain) and drops you into an interactive menu. It's grouped, with a
+guided walkthrough at the top and the individual tools organised into submenus.
+
+- **Getting started** — a guided, five-step walkthrough that teaches each Salt
+  concept as it sets it up: organisation → collaborators → Robo Guardians →
+  account → first policy. It detects what you've already done and resumes, and
+  when a step depends on something outside the terminal (a collaborator
+  accepting an invite, a Robo Guardian coming online) it polls for a bit, then
+  lets you exit and re-run later to continue. Aimed at first-time users; drawn
+  from the [Salt onboarding docs](https://kagamidigital.github.io/docs/documentation/using-salt/onboarding).
+
+### Organisation
 
 - **Create organisation** — create a new organisation with you as owner, then
   optionally register a Robo Guardian host for it and choose how to set it
@@ -72,12 +83,23 @@ privileged domain) and drops you into an interactive menu:
   decline them.
 - **List your organisations** — the organisations you're a member of, and
   your access level in each.
+
+### Robo Guardians
+
+- **Set up Robo Guardians** — register (or re-issue setup for) an existing
+  organisation's robo host and get its self-hosted script or CloudFormation
+  URL — the same setup "Create organisation" offers, but available any time,
+  not just at creation. Reuses an existing host record rather than failing if
+  one's already registered.
 - **Check robo guardians** — see whether an organisation's Robo Guardians
   are currently online, before starting a ceremony that needs them. Worth
   checking if "Create account" ever seems stuck waiting for a signer to join
   — there's no timeout for a party that never shows up in the huddle
   (`timeoutMs` on account creation only bounds keygen rounds *after*
   everyone's present, not the wait for presence itself).
+
+### Accounts
+
 - **Create account** — start a new account's MPC keygen ceremony in an
   organisation (subject to whatever access level the API enforces for your
   membership). Co-signers are picked from the organisation's active
@@ -91,6 +113,9 @@ privileged domain) and drops you into an interactive menu:
   in a terminal while you wait; press Enter to stop.
 - **List accounts** — the Salt accounts that exist within an organisation you
   pick.
+
+### Assets
+
 - **Faucet for Salt accounts** — top up a Salt account with test funds on any
   of the four supported testnets (only fully set-up accounts are offered as
   targets, not your signing wallet). Pick the account and network; it prints
@@ -119,6 +144,9 @@ privileged domain) and drops you into an interactive menu:
   unlike a mainnet-only aggregator this works on testnet today (e.g. USDC ↔
   WETH). ERC-20 → ERC-20 only for now (wrap native first). See
   [`docs/swap.md`](docs/swap.md).
+
+### Policies
+
 - **Manage policies** — form-driven CRUD for an account's transaction
   policies (whitelist / blocklist, denied proposers, per-transaction limits,
   contract-call restrictions) across chains. List, add, edit, and delete

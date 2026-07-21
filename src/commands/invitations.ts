@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
-import { select } from "../prompts.js";
+import { ACCESS_LEVEL_LABEL, select } from "../prompts.js";
 
 export async function manageInvitations(salt: Salt): Promise<void> {
   const s = p.spinner();
@@ -22,16 +22,33 @@ export async function manageInvitations(salt: Salt): Promise<void> {
     return;
   }
 
+  // The invitation payload only carries organisation_id + accessLevel, and Salt
+  // gives an invitee no read access to the organisation (its name, members, or
+  // owners) until they accept — getOrganisationById 403s and getOrganisations
+  // omits it. So the org ID + access level is all we can show; the invitee
+  // validates by confirming those against what the inviter told them out of band.
   const invitationId = await select({
     message: "Select an invitation",
     options: invitations.map((inv) => ({
       value: inv._id,
       label: `Organisation ${inv.organisation_id}`,
-      hint: `access level ${inv.accessLevel}`,
+      hint: ACCESS_LEVEL_LABEL[inv.accessLevel] ?? `access level ${inv.accessLevel}`,
     })),
   });
 
   if (p.isCancel(invitationId)) return;
+  const selected = invitations.find((inv) => inv._id === invitationId)!;
+
+  p.note(
+    "The organisation's name and owner aren't\n" +
+      "shown until you accept (a Salt limitation).\n" +
+      "Before accepting, confirm with whoever\n" +
+      "invited you that these match what they sent:\n\n" +
+      "Organisation ID:\n" +
+      `${selected.organisation_id}\n\n` +
+      `Your access level: ${ACCESS_LEVEL_LABEL[selected.accessLevel] ?? selected.accessLevel}`,
+    "Verify this invitation",
+  );
 
   const action = await select({
     message: "What would you like to do?",

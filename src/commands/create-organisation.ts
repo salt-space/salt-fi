@@ -2,7 +2,7 @@ import fs from "node:fs";
 import * as p from "@clack/prompts";
 import type { RoboHost, Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
-import { select } from "../prompts.js";
+import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 function slugify(name: string): string {
@@ -26,7 +26,17 @@ function withOrgHeader(script: string, organisationName: string, organisationId:
   return header + script;
 }
 
-export async function createOrganisationFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+/**
+ * Creates an organisation and (unless `skipRoboSetup`) offers to register its
+ * Robo Guardian host. Returns the new organisation's id so callers can chain —
+ * the getting-started wizard uses this, and sets `skipRoboSetup` because it
+ * runs robo setup as its own explained step, in the docs' order.
+ */
+export async function createOrganisationFlow(
+  salt: Salt,
+  walletClient: SaltWalletClient,
+  options: { skipRoboSetup?: boolean } = {},
+): Promise<string | undefined> {
   const selfAddress = walletClient.account.address;
 
   const orgName = await p.text({
@@ -68,44 +78,92 @@ export async function createOrganisationFlow(salt: Salt, walletClient: SaltWalle
     return;
   }
 
+  if (options.skipRoboSetup) return organisation._id;
+
   const setUpRobos = await p.confirm({
     message: "Set up Robo Guardians for this organisation now?",
   });
   if (p.isCancel(setUpRobos) || !setUpRobos) {
-    p.log.info('You can set up Robo Guardians for this organisation later — there\'s just no menu item for that on an existing org yet, only as part of "Create organisation".');
-    return;
+    p.log.info('You can set this up later from "Robo Guardians → Set up Robo Guardians".');
+    return organisation._id;
   }
 
   await setUpRoboHost(salt, walletClient, organisation._id, organisation.name);
+  return organisation._id;
 }
 
-async function setUpRoboHost(
+/** Menu entry: pick an organisation, then set up (or re-issue) its Robo Guardian host. */
+export async function setUpRoboFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  const organisationId = await pickOrganisation(salt, "Set up Robo Guardians for which organisation?");
+  if (!organisationId) return;
+  let organisationName = "your organisation";
+  try {
+    ({
+      organisation: { name: organisationName },
+    } = await salt.getOrganisationById(organisationId));
+  } catch {
+    // fall back to the generic name
+  }
+  await setUpRoboHost(salt, walletClient, organisationId, organisationName);
+}
+
+/**
+ * Registers a Robo Guardian host for an organisation and hands back either a
+ * self-hosted install script or a CloudFormation launch URL. Exported so it can
+ * be run for an *existing* org (menu: Robo Guardians → Set up Robo Guardians)
+ * and from the getting-started wizard, not just at org-creation time.
+ */
+export async function setUpRoboHost(
   salt: Salt,
   walletClient: SaltWalletClient,
   organisationId: string,
   organisationName: string,
 ): Promise<void> {
-  const roboNameInput = await p.text({
-    message: "Robo Guardian display name",
-    defaultValue: `${organisationName} Robos`,
-  });
-  if (p.isCancel(roboNameInput)) return;
-  const roboName = roboNameInput || `${organisationName} Robos`;
-
-  const s = p.spinner();
-  s.start("Registering robo host");
-  let host;
+  // An org can only have one robo host — a second createRoboHost 409s — so reuse
+  // an existing record and just re-issue its setup instructions. That's the
+  // normal case when re-running this for an org that's registered but whose
+  // host was never provisioned (or whose script was lost).
+  const existing = p.spinner();
+  existing.start("Checking for an existing robo host");
+  let host: Awaited<ReturnType<Salt["getRoboHost"]>> = null;
   try {
-    host = await salt.createRoboHost({
-      name: roboName,
-      organisationId,
-      ownerAddress: walletClient.account.address,
+    host = await salt.getRoboHost({ organisationId });
+  } catch {
+    host = null;
+  }
+  existing.stop(host ? "Found an existing robo host" : "No robo host registered yet");
+
+  if (host?.provisioned) {
+    p.log.info(
+      "This organisation's Robo Guardians are already provisioned. Re-running setup would only " +
+        'be useful if you need to re-host them — check "Robo Guardians → Check robo guardians" for status.',
+    );
+    const goOn = await p.confirm({ message: "Generate setup instructions anyway?", initialValue: false });
+    if (p.isCancel(goOn) || !goOn) return;
+  }
+
+  if (!host) {
+    const roboNameInput = await p.text({
+      message: "Robo Guardian display name",
+      defaultValue: `${organisationName} Robos`,
     });
-    s.stop("Robo host registered");
-  } catch (err) {
-    s.stop("Failed to register robo host");
-    reportError(err);
-    return;
+    if (p.isCancel(roboNameInput)) return;
+    const roboName = roboNameInput || `${organisationName} Robos`;
+
+    const s = p.spinner();
+    s.start("Registering robo host");
+    try {
+      host = await salt.createRoboHost({
+        name: roboName,
+        organisationId,
+        ownerAddress: walletClient.account.address,
+      });
+      s.stop("Robo host registered");
+    } catch (err) {
+      s.stop("Failed to register robo host");
+      reportError(err);
+      return;
+    }
   }
 
   // `userPublicKey` is only populated by a fresh authenticate() call — a
@@ -161,6 +219,7 @@ async function setUpRoboHost(
   }
 
   const filename = `robo-setup-${slugify(organisationName)}-${organisationId}.sh`;
+  const roboName = host.name ?? `${organisationName} Robos`;
   fs.writeFileSync(filename, withOrgHeader(script, organisationName, organisationId, roboName), { mode: 0o600 });
 
   p.log.success(

@@ -5,6 +5,24 @@ import { CHAIN_NAME_BY_ID } from "./chains.js";
 export const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
 export const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
+/** Fallback name lookup for addresses with no nickname stored on the policy itself. */
+export type ResolveLabel = (address: string) => string | undefined;
+
+/**
+ * Builds a fallback label lookup for policy addresses: an unlabeled whitelist
+ * entry is often another account in the org, or a collaborator's own signing
+ * address, so show the name rather than a bare hex string.
+ */
+export function buildResolveLabel(
+  accounts: { evmAddress?: string; name: string }[],
+  members: { address: string; name?: string }[],
+): ResolveLabel {
+  const byAddress = new Map<string, string>();
+  for (const account of accounts) if (account.evmAddress) byAddress.set(account.evmAddress.toLowerCase(), account.name);
+  for (const member of members) if (member.name) byAddress.set(member.address.toLowerCase(), member.name);
+  return (address) => byAddress.get(address.toLowerCase());
+}
+
 export const POLICY_TYPE_LABEL: Record<PolicyType, string> = {
   allowed_recipients: "Allowed recipients (whitelist)",
   denied_recipients: "Denied recipients (blocklist)",
