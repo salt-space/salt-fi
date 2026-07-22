@@ -4,13 +4,75 @@ A mini terminal app to get started using Salt's new SDK ([`salt-sdk`](https://ww
 
 Salt is in Beta — treat this project as subject to change.
 
+## New to the terminal? Start here
+
+No experience needed — this section gets you comfortable before anything else.
+If you already live in a terminal, skip to [Prerequisites](#prerequisites).
+
+**What is a terminal?** It's just a window where you type commands instead of
+clicking buttons. This whole app runs inside that window: you'll type a command
+to start it, then use your arrow keys and Enter to move through menus. That's
+it — no coding required.
+
+**Open your terminal:**
+
+- **macOS** — press `Cmd + Space` to open Spotlight, type `Terminal`, and press
+  Enter. (It also lives in Applications → Utilities → Terminal.)
+- **Windows** — click Start, type `PowerShell`, and press Enter. (Or open the
+  newer "Windows Terminal" if you have it — either works.)
+- **Linux** — press `Ctrl + Alt + T`, or search your apps for "Terminal".
+
+A window opens with a blinking cursor. You type a line, press Enter, and it
+runs. If something looks stuck, you can always press `Ctrl + C` to stop the
+current command and get your prompt back.
+
+**Move into a folder.** After you clone this project (step 1 of
+[Setup](#setup)), you need to tell the terminal to "go into" that folder before
+running the app. The command is `cd` (short for "change directory"):
+
+```
+cd salt-fi
+```
+
+Not sure of the full path to the folder? On macOS and most Linux desktops you
+can type `cd ` (with a space after it), then **drag the folder from your file
+explorer onto the terminal window** — it fills in the path for you. Then press
+Enter. To check where you are, type `pwd` ("print working directory") and press
+Enter; it shows the folder you're currently in.
+
+That's the whole toolkit you need: open the terminal, `cd` into the folder, and
+type the commands below exactly as shown.
+
+## Prerequisites
+
+You'll need these installed on your machine first:
+
+- **Node.js 22 or newer** (this installs `npm` alongside it). Grab it from
+  [nodejs.org](https://nodejs.org/) or, if you juggle Node versions, via
+  [nvm](https://github.com/nvm-sh/nvm) (`nvm install 22 && nvm use 22`). The
+  SDK declares Node 24+, so on 22 you may see a harmless `EBADENGINE` warning
+  during `npm install` — it still works. Verify your install with:
+  ```
+  node --version   # should print v22.x or higher
+  npm --version
+  ```
+- **Git** — to clone this repository ([git-scm.com](https://git-scm.com/)).
+- **An EVM wallet private key** — a 0x-prefixed private key for any Ethereum
+  account (see step 3 below for what it's used for). A throwaway key is fine
+  for testnet; don't reuse one that holds real mainnet funds.
+
 ## Setup
 
-1. Install dependencies:
+1. Clone the repository and enter it:
+   ```
+   git clone https://github.com/salt-space/salt-fi.git
+   cd salt-fi
+   ```
+2. Install dependencies:
    ```
    npm install
    ```
-2. Copy `.env.example` to `.env` and set:
+3. Copy `.env.example` to `.env` and set:
    - `PRIVATE_KEY` — a 0x-prefixed private key for any EVM EOA (this is the
      wallet that signs the SIWE login and, if you use "Create account",
      co-signs the account's keygen ceremony). You never interact with
@@ -20,10 +82,12 @@ Salt is in Beta — treat this project as subject to change.
    - `RPC_URL` — optional; an RPC endpoint for Arbitrum Sepolia, since that's
      the orchestration chain the SDK connects the signer to under the hood.
      Leave blank to use viem's default public RPC for the chain.
-3. Run in dev mode:
+4. Run in dev mode:
    ```
    npm run dev
    ```
+   This signs you in and drops you into the interactive menu. First-time
+   users should pick **Getting started** for a guided walkthrough.
 
 ### Running as two identities at once
 
