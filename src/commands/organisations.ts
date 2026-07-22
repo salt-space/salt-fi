@@ -41,51 +41,58 @@ export async function listOrganisations(salt: Salt, selfAddress: string): Promis
   }
 }
 
-/** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
-export async function inviteMemberFlow(salt: Salt, preselectedOrganisationId?: string): Promise<void> {
+/**
+ * `preselectedOrganisationId` skips the org picker — used by the getting-started
+ * wizard, which already knows the org. Returns `true` if an invitation was
+ * actually sent, `false` if the user cancelled/declined; the wizard uses this to
+ * exit rather than waiting for an acceptance that will never come.
+ */
+export async function inviteMemberFlow(salt: Salt, preselectedOrganisationId?: string): Promise<boolean> {
   const organisationId = preselectedOrganisationId ?? (await pickOrganisation(salt, "Invite a member to which organisation?"));
-  if (!organisationId) return;
+  if (!organisationId) return false;
 
   const address = await p.text({
     message: "Invitee's EVM address",
     placeholder: "0x1234567890123456789012345678901234567890",
     validate: (value) => (!value || !ADDRESS_PATTERN.test(value) ? "Enter a valid 0x-prefixed address" : undefined),
   });
-  if (p.isCancel(address)) return;
+  if (p.isCancel(address)) return false;
 
   const name = await p.text({
     message: "Invitee's display name (optional)",
     defaultValue: "",
   });
-  if (p.isCancel(name)) return;
+  if (p.isCancel(name)) return false;
 
   const role = await p.text({
     message: "Invitee's role label",
     placeholder: "e.g. CFO, Signer",
     validate: (value) => (!value || value.trim().length === 0 ? "Role is required" : undefined),
   });
-  if (p.isCancel(role)) return;
+  if (p.isCancel(role)) return false;
 
   const accessLevel = await select({
     message: "Access level",
     initialValue: "member" as const,
     options: ACCESS_LEVEL_OPTIONS,
   });
-  if (p.isCancel(accessLevel)) return;
+  if (p.isCancel(accessLevel)) return false;
 
   const confirmed = await p.confirm({
     message: `Invite ${address} as "${role}" (${accessLevel}) to this organisation?`,
   });
-  if (p.isCancel(confirmed) || !confirmed) return;
+  if (p.isCancel(confirmed) || !confirmed) return false;
 
   const s = p.spinner();
   s.start("Sending invitation");
   try {
     await salt.inviteMember(organisationId, { address, name, role, accessLevel });
     s.stop("Invitation sent");
+    return true;
   } catch (err) {
     s.stop("Failed to send invitation");
     reportError(err);
+    return false;
   }
 }
 

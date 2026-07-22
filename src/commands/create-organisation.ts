@@ -112,13 +112,17 @@ export async function setUpRoboFlow(salt: Salt, walletClient: SaltWalletClient):
  * self-hosted install script or a CloudFormation launch URL. Exported so it can
  * be run for an *existing* org (menu: Robo Guardians → Set up Robo Guardians)
  * and from the getting-started wizard, not just at org-creation time.
+ *
+ * Returns `false` if the user cancelled (Esc) or setup failed, `true` if it
+ * produced setup instructions (or there was nothing to do). The wizard uses
+ * this to exit rather than waiting for robos that were never set up.
  */
 export async function setUpRoboHost(
   salt: Salt,
   walletClient: SaltWalletClient,
   organisationId: string,
   organisationName: string,
-): Promise<void> {
+): Promise<boolean> {
   // An org can only have one robo host — a second createRoboHost 409s — so reuse
   // an existing record and just re-issue its setup instructions. That's the
   // normal case when re-running this for an org that's registered but whose
@@ -139,7 +143,8 @@ export async function setUpRoboHost(
         'be useful if you need to re-host them — check "Robo Guardians → Check robo guardians" for status.',
     );
     const goOn = await p.confirm({ message: "Generate setup instructions anyway?", initialValue: false });
-    if (p.isCancel(goOn) || !goOn) return;
+    if (p.isCancel(goOn)) return false;
+    if (!goOn) return true; // already provisioned, declined to regenerate — nothing to do
   }
 
   if (!host) {
@@ -147,7 +152,7 @@ export async function setUpRoboHost(
       message: "Robo Guardian display name",
       defaultValue: `${organisationName} Robos`,
     });
-    if (p.isCancel(roboNameInput)) return;
+    if (p.isCancel(roboNameInput)) return false;
     const roboName = roboNameInput || `${organisationName} Robos`;
 
     const s = p.spinner();
@@ -162,7 +167,7 @@ export async function setUpRoboHost(
     } catch (err) {
       s.stop("Failed to register robo host");
       reportError(err);
-      return;
+      return false;
     }
   }
 
@@ -179,13 +184,13 @@ export async function setUpRoboHost(
     } catch (err) {
       s2.stop("Failed to refresh session");
       reportError(err);
-      return;
+      return false;
     }
   }
 
   if (!salt.userPublicKey) {
     p.log.error("Could not determine your public key — can't generate the robo setup script.");
-    return;
+    return false;
   }
 
   const method = await select({
@@ -203,11 +208,11 @@ export async function setUpRoboHost(
       },
     ],
   });
-  if (p.isCancel(method)) return;
+  if (p.isCancel(method)) return false;
 
   if (method === "cloudformation") {
     await generateCloudFormationLink(host, organisationName, salt.userPublicKey);
-    return;
+    return true;
   }
 
   let script: string;
@@ -215,7 +220,7 @@ export async function setUpRoboHost(
     script = host.generateSetupScript({ publicKey: salt.userPublicKey });
   } catch (err) {
     reportError(err);
-    return;
+    return false;
   }
 
   const filename = `robo-setup-${slugify(organisationName)}-${organisationId}.sh`;
@@ -233,6 +238,7 @@ export async function setUpRoboHost(
       "(e.g. how to do this with only a browser-based terminal, no scp).\n\n" +
       'Once it\'s running, use "Check robo status" here to confirm it connected.',
   );
+  return true;
 }
 
 /** Pull the region, template URL, and stack parameters back out of the SDK's generated URL. */

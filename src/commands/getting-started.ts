@@ -146,7 +146,10 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
 
   if ((await activeCount()) < 2) {
     p.log.info("Only you are active so far. Invite someone, then wait for them to accept.");
-    await inviteMemberFlow(salt, organisationId);
+    const invited = await inviteMemberFlow(salt, organisationId);
+    // Escaping the invite should leave the wizard, not wait for an acceptance
+    // that will never come.
+    if (!invited) return;
     const gate = await waitForGate(
       async () => {
         const n = await activeCount();
@@ -192,7 +195,10 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
   } else if ((await roboOnlineCount()) > 0) {
     p.log.success("At least one Robo Guardian is already online.");
   } else {
-    await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o._id === organisationId)?.name ?? "your organisation");
+    const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o._id === organisationId)?.name ?? "your organisation");
+    // Escaping robo setup should leave the wizard entirely, not fall through to
+    // polling for robos that were never set up.
+    if (!roboSetUp) return;
     p.log.info("Once the host is running (script executed, or CloudFormation stack launched), the robos come online.");
     const gate = await waitForGate(
       async () => {
