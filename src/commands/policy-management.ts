@@ -21,6 +21,8 @@ import type { SaltWalletClient } from "../wallet.js";
 
 type CreatableType = Exclude<PolicyType, "nominated_approvers">;
 type RecipientEntry = { address: string; nickname?: string };
+/** A pickable signer for a denied-proposers policy: the account's human co-signers. */
+type ProposerOption = { address: string; label: string; hint?: string };
 type LimitEntry = { address: string; amount: string };
 type Restriction = {
   contractAddress: string;
@@ -64,6 +66,63 @@ async function buildRecipients(
     const nickname = await p.text({ message: "Nickname (optional)", defaultValue: "" });
     if (p.isCancel(nickname)) return CANCEL;
     entries.push(nickname ? { address, nickname } : { address });
+  }
+}
+
+/**
+ * The account's human signers, as pickable options for a denied-proposers
+ * policy. Only humans can *propose* a transfer (robos co-sign, they don't
+ * initiate), so robo guardians are filtered out. Labels resolve to org member
+ * names where known. Returns `[]` if the signer set can't be read — callers
+ * fall back to freeform address entry.
+ */
+async function loadProposerOptions(salt: Salt, accountId: string, resolveLabel: ResolveLabel): Promise<ProposerOption[]> {
+  try {
+    const signers = await salt.getAccountSigners(accountId);
+    return signers
+      .filter((s) => !s.isRobo)
+      .map((s) => {
+        const label = resolveLabel(s.address);
+        return { address: s.address, label: label ?? s.address, hint: label ? s.address : undefined };
+      });
+  } catch {
+    // Reading signers needs account access; if it fails, callers degrade to
+    // freeform entry rather than blocking the whole policy flow.
+    return [];
+  }
+}
+
+/**
+ * Pick the denied proposers from the account's co-signers (multiselect) rather
+ * than typing addresses. Pre-checks any addresses already on the policy (edit
+ * flow) and preserves any existing entries that aren't in the signer set.
+ * Returns the full list or CANCEL (Esc). Re-prompts on an empty selection —
+ * a proposers policy needs at least one entry, and space (not enter) toggles.
+ */
+async function buildProposers(
+  options: ProposerOption[],
+  existing: RecipientEntry[] = [],
+): Promise<RecipientEntry[] | typeof CANCEL> {
+  const existingAddrs = new Set(existing.map((e) => e.address.toLowerCase()));
+  const optionAddrs = new Set(options.map((o) => o.address.toLowerCase()));
+  // Keep any existing off-list entries (e.g. a manually-added address from
+  // before this account's signer set changed); the multiselect owns the rest.
+  const preserved = existing.filter((e) => !optionAddrs.has(e.address.toLowerCase()));
+
+  while (true) {
+    const selected = await p.multiselect({
+      message: "Which co-signers may NOT initiate transfers?",
+      required: false,
+      initialValues: options.filter((o) => existingAddrs.has(o.address.toLowerCase())).map((o) => o.address),
+      options: options.map((o) => ({ value: o.address, label: o.label, hint: o.hint })),
+    });
+    if (p.isCancel(selected)) return CANCEL;
+    const chosen = [...preserved, ...selected.map((address) => ({ address }))];
+    if (chosen.length === 0) {
+      p.log.warn("Toggle a co-signer with space, then press enter — or press Esc to go back.");
+      continue;
+    }
+    return chosen;
   }
 }
 
@@ -190,7 +249,17 @@ async function buildRestrictions(
 }
 
 /** Build the full params object for a given policy type: object, CANCEL, or GO_BACK. */
-async function buildParams(type: CreatableType): Promise<Record<string, unknown> | typeof CANCEL | typeof GO_BACK> {
+async function buildParams(
+  type: CreatableType,
+  proposerOptions: ProposerOption[] = [],
+): Promise<Record<string, unknown> | typeof CANCEL | typeof GO_BACK> {
+  // Denied proposers are always the account's own co-signers, so offer them as
+  // a pick-list. Fall back to freeform entry only if the signer set is empty
+  // or unreadable.
+  if (type === "denied_proposers" && proposerOptions.length > 0) {
+    const recipients = await buildProposers(proposerOptions);
+    return recipients === CANCEL ? recipients : { recipients };
+  }
   if (RECIPIENT_TYPES.includes(type)) {
     const recipients = await buildRecipients([], true);
     return recipients === CANCEL || recipients === GO_BACK ? recipients : { recipients };
@@ -217,6 +286,8 @@ export async function addPolicy(
   let type: CreatableType | undefined;
   let chain: string | undefined;
   let params: Record<string, unknown> | undefined;
+  // Loaded lazily the first time a denied-proposers policy is being built.
+  let proposerOptions: ProposerOption[] | undefined;
 
   while (params === undefined) {
     if (type === undefined) {
@@ -241,7 +312,14 @@ export async function addPolicy(
       chain = choice;
     }
 
-    const built = await buildParams(type);
+    if (type === "denied_proposers" && proposerOptions === undefined) {
+      proposerOptions = await loadProposerOptions(salt, accountId, resolveLabel);
+      if (proposerOptions.length === 0) {
+        p.log.info("Couldn't read this account's co-signers — enter proposer addresses manually.");
+      }
+    }
+
+    const built = await buildParams(type, proposerOptions ?? []);
     if (built === GO_BACK) {
       chain = undefined; // back to chain selection
       continue;
@@ -298,6 +376,11 @@ async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveL
 
   let working = [...(params[key] as Record<string, unknown>[])];
 
+  // For a denied-proposers policy, adding entries picks from the account's
+  // co-signers rather than freeform address entry (loaded once, on demand).
+  const isProposers = policy.type === "denied_proposers";
+  let proposerOptions: ProposerOption[] | undefined;
+
   const SAVE = "__save";
   const CANCEL_EDIT = "__cancel";
   const ADD = "__add";
@@ -322,10 +405,15 @@ async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveL
     if (p.isCancel(action) || action === CANCEL_EDIT) return;
 
     if (action === ADD) {
+      if (isProposers && proposerOptions === undefined) {
+        proposerOptions = await loadProposerOptions(salt, policy.accountId, resolveLabel);
+      }
       // Builders return the full list (existing + newly added).
       const built =
         key === "recipients"
-          ? await buildRecipients(working as never)
+          ? isProposers && proposerOptions && proposerOptions.length > 0
+            ? await buildProposers(proposerOptions, working as never)
+            : await buildRecipients(working as never)
           : key === "limits"
             ? await buildLimits(working as never)
             : await buildRestrictions(working as never);
