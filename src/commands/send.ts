@@ -264,9 +264,10 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
         (transaction.broadcastReceipt ? `  tx hash: ${transaction.broadcastReceipt.transactionHash}` : "  (no broadcast receipt yet)"),
     );
     if (transaction.broadcastReceipt) {
-      // Bare, clickable line — see the copy-safe URL pattern in faucet.ts.
+      // Labelled to match the lines above, but printed bare (outside clack's
+      // box) so the URL stays a single clickable string — see faucet.ts.
       const explorer = explorerTxUrl(token.chainId, transaction.broadcastReceipt.transactionHash);
-      if (explorer) console.log(explorer);
+      if (explorer) console.log(`  tx link: ${explorer}`);
     }
   } catch (err) {
     // The ceremony itself broadcasts and confirms the transaction — this
@@ -283,7 +284,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
           s2.stop("Transaction complete (confirmation was just slow to arrive)");
           p.log.success(`Sent ${amountInput} ${token.symbol} on ${chainName}\n  tx hash: ${receipt.transactionHash}\n  status: ${receipt.status}`);
           const explorer = explorerTxUrl(token.chainId, receipt.transactionHash);
-          if (explorer) console.log(explorer);
+          if (explorer) console.log(`  tx link: ${explorer}`);
           return;
         } catch {
           // Genuinely not confirmed even with extra patience — fall through.

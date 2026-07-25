@@ -535,7 +535,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
     );
     if (hash) {
       const explorer = explorerTxUrl(chainId, hash);
-      if (explorer) console.log(explorer);
+      if (explorer) console.log(`  tx link: ${explorer}`);
     }
   } catch (err) {
     reportError(err);
