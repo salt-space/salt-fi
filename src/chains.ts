@@ -17,3 +17,13 @@ export const CHAIN_NAME_BY_ID: Record<string, string> = {
   "80002": "Polygon Amoy",
   "84532": "Base Sepolia",
 };
+
+/**
+ * Block-explorer URL for a transaction on the given chain, or `undefined` if
+ * the chain has no known explorer. Uses viem's built-in `blockExplorers`, so
+ * there's no per-chain URL list to maintain here.
+ */
+export function explorerTxUrl(chainId: string, txHash: string): string | undefined {
+  const base = CHAIN_BY_ID[chainId]?.blockExplorers?.default?.url;
+  return base ? `${base}/tx/${txHash}` : undefined;
+}

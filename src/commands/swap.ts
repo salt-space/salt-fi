@@ -9,7 +9,7 @@ import {
   type PublicClient,
   WaitForTransactionReceiptTimeoutError,
 } from "viem";
-import { CHAIN_BY_ID, CHAIN_NAME_BY_ID } from "../chains.js";
+import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl } from "../chains.js";
 import { formatSaltError, reportError } from "../errors.js";
 import { POLICY_TYPE_LABEL } from "../policies.js";
 import { pickOrganisation, select } from "../prompts.js";
@@ -533,6 +533,10 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
       `Swapped ${amountInput} ${sellToken.symbol} → ~${formatUnits(quote.amountOut, buyDecimals)} ${buySymbol} on ${chainName}\n` +
         (hash ? `  tx hash: ${hash}` : "  (no broadcast receipt yet)"),
     );
+    if (hash) {
+      const explorer = explorerTxUrl(chainId, hash);
+      if (explorer) console.log(explorer);
+    }
   } catch (err) {
     reportError(err);
   }
