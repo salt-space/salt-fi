@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { createAccountFlow, listAccounts } from "./commands/accounts.js";
+import { accountBalancesFlow } from "./commands/balances.js";
 import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
@@ -83,6 +84,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
     assets: {
       title: "Assets",
       entries: [
+        { value: "balances", label: "View balances", hint: "token holdings per account", run: () => accountBalancesFlow(salt) },
         { value: "faucet", label: "Faucet for Salt accounts", run: () => faucetFlow(salt) },
         { value: "send", label: "Send assets", run: () => sendTransactionFlow(salt, walletClient) },
         { value: "swap", label: "Swap assets", run: () => swapFlow(salt, walletClient) },
