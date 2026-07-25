@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { buildTransferTransaction, TransferType } from "salt-sdk";
 import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
-import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, SEND_NETWORK_IDS } from "../chains.js";
+import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
@@ -263,6 +263,12 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
         `  transaction id: ${transaction.id}\n` +
         (transaction.broadcastReceipt ? `  tx hash: ${transaction.broadcastReceipt.transactionHash}` : "  (no broadcast receipt yet)"),
     );
+    if (transaction.broadcastReceipt) {
+      // Labelled to match the lines above, but printed bare (outside clack's
+      // box) so the URL stays a single clickable string — see faucet.ts.
+      const explorer = explorerTxUrl(token.chainId, transaction.broadcastReceipt.transactionHash);
+      if (explorer) console.log(`  tx link: ${explorer}`);
+    }
   } catch (err) {
     // The ceremony itself broadcasts and confirms the transaction — this
     // timeout just means *our* wait gave up watching for the receipt, not
@@ -277,6 +283,8 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
           const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
           s2.stop("Transaction complete (confirmation was just slow to arrive)");
           p.log.success(`Sent ${amountInput} ${token.symbol} on ${chainName}\n  tx hash: ${receipt.transactionHash}\n  status: ${receipt.status}`);
+          const explorer = explorerTxUrl(token.chainId, receipt.transactionHash);
+          if (explorer) console.log(`  tx link: ${explorer}`);
           return;
         } catch {
           // Genuinely not confirmed even with extra patience — fall through.
