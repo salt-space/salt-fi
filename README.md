@@ -77,14 +77,15 @@ You'll need these installed on your machine first:
      wallet that signs the SIWE login and, if you use "Create account",
      co-signs the account's keygen ceremony). You never interact with
      Arbitrum Sepolia directly — that's just the chain hosting Salt's on-chain
-     shard registry (where your account's key shards are backed up), and where
-     the signing wallet pays gas for those registry calls; the accounts you
-     create/hold assets in can live on many other supported testnets.
+     shard registry (where your account's key shards are registered/backed up).
+     Salt covers the gas for those registry operations — the signer's wallet
+     never pays gas; the accounts you create/hold assets in can live on many
+     other supported testnets.
    - `RPC_URL` — optional; an RPC endpoint for Arbitrum Sepolia, the chain Salt
-     records key-shard registry data on (and where the signer pays gas). The SDK
-     labels this the "orchestration chain", but that's a misnomer — the MPC
-     ceremonies (keygen + signing) run over the websocket, not on this chain.
-     Leave blank to use viem's default public RPC for the chain.
+     records key-shard registry data on. The SDK labels this the "orchestration
+     chain", but that's a misnomer — the MPC ceremonies (keygen + signing) run
+     over the websocket, not on this chain. Leave blank to use viem's default
+     public RPC for the chain.
 4. Run in dev mode:
    ```
    npm run dev
