@@ -52,7 +52,12 @@ current docs/types before relying on anything below long-term.
 
 ## Network / chain IDs — the bug we hit
 
-- **TESTNET orchestration chain is Arbitrum Sepolia, chain ID `421614`.**
+- **TESTNET's Arbitrum Sepolia (chain ID `421614`) is Salt's shard-registry
+  chain.** The SDK's `EnvironmentConfig` labels it the "orchestration chain",
+  but that's a misnomer: its real role is the on-chain shard registry where key
+  shards are registered/backed up, and it's the chain the signer's wallet must
+  be on and pays gas on. The MPC ceremonies (keygen + signing) run over the
+  websocket, not on this chain.
 - Arbitrum **One** (mainnet) is `42161` — do NOT use this for testnet work.
 - `INTU_NETWORK` / `INTU_*` naming is from the **old** pre-SDK-rewrite stack.
   If you see `INTU_NETWORK` or similar in any generated config, that's a
