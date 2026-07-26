@@ -16,7 +16,4 @@ export const env = {
     }
     return key as `0x${string}`;
   },
-  get rpcUrl(): string | undefined {
-    return process.env.RPC_URL;
-  },
 };

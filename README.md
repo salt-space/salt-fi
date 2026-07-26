@@ -81,11 +81,6 @@ You'll need these installed on your machine first:
      Salt covers the gas for those registry operations — the signer's wallet
      never pays gas; the accounts you create/hold assets in can live on many
      other supported testnets.
-   - `RPC_URL` — optional; an RPC endpoint for Arbitrum Sepolia, the chain Salt
-     records key-shard registry data on. The SDK labels this the "orchestration
-     chain", but that's a misnomer — the MPC ceremonies (keygen + signing) run
-     over the websocket, not on this chain. Leave blank to use viem's default
-     public RPC for the chain.
 4. Run in dev mode:
    ```
    npm run dev

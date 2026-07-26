@@ -8,7 +8,10 @@ export function createSaltWalletClient() {
   return createWalletClient({
     account,
     chain: arbitrumSepolia,
-    transport: http(env.rpcUrl),
+    // No custom RPC: the signer only signs (SIWE + keygen shares, done locally /
+    // over the websocket) and never sends a transaction, so viem's default
+    // public RPC for the chain is all that's ever needed.
+    transport: http(),
   });
 }
 
