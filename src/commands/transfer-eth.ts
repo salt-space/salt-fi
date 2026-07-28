@@ -16,6 +16,7 @@ import {
   explorerTxUrl,
   SEND_NETWORK_IDS,
 } from "../chains.js";
+import { env } from "../env.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
 import { loadSalt } from "../session.js";
@@ -117,7 +118,10 @@ async function transferEthFlow(
 
   const chain = CHAIN_BY_ID[chainId];
   const chainName = CHAIN_NAME_BY_ID[chainId] ?? chainId;
-  const publicClient = createPublicClient({ chain, transport: http() });
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(env.rpcUrl),
+  });
 
   const balanceSpinner = p.spinner();
   balanceSpinner.start("Fetching ETH balance");
