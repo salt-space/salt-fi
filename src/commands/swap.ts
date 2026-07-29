@@ -13,6 +13,7 @@ import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl } from "../chains.js";
 import { formatSaltError, reportError } from "../errors.js";
 import { POLICY_TYPE_LABEL } from "../policies.js";
 import { pickOrganisation, select } from "../prompts.js";
+import { fetchAccountTokens } from "../token-balances.js";
 import {
   encodeApprove,
   encodeExactInputSingle,
@@ -332,7 +333,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   s.start("Fetching balances");
   let tokens;
   try {
-    tokens = await salt.getAccountTokens(accountId, { raw: true, networks: [chainId] });
+    tokens = await fetchAccountTokens(accountAddress, { raw: true, networks: [chainId] });
     s.stop(`Found ${tokens.length} token balance(s) on ${chainName}`);
   } catch (err) {
     s.stop("Failed to fetch balances");

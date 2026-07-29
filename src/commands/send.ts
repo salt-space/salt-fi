@@ -5,6 +5,7 @@ import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionRe
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
+import { fetchAccountTokens } from "../token-balances.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
@@ -75,12 +76,13 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     })),
   });
   if (p.isCancel(accountId)) return;
+  const account = eligibleAccounts.find((a) => a.id === accountId)!;
 
   const s = p.spinner();
   s.start("Fetching balances");
   let tokens;
   try {
-    tokens = await salt.getAccountTokens(accountId, { raw: true, networks: SEND_NETWORK_IDS });
+    tokens = await fetchAccountTokens(account.evmAddress as string, { raw: true, networks: SEND_NETWORK_IDS });
     s.stop(`Found ${tokens.length} token balance(s)`);
   } catch (err) {
     s.stop("Failed to fetch balances");

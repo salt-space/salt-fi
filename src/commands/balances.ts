@@ -1,8 +1,9 @@
 import * as p from "@clack/prompts";
-import type { Salt, TokenBalance } from "salt-sdk";
+import type { Salt } from "salt-sdk";
 import { CHAIN_NAME_BY_ID, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
+import { fetchAccountTokens, type TokenBalance } from "../token-balances.js";
 
 const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -95,12 +96,13 @@ export async function accountBalancesFlow(salt: Salt): Promise<void> {
   });
   if (p.isCancel(accountId)) return;
   const account = usableAccounts.find((a) => a.id === accountId);
+  if (!account?.evmAddress) return;
 
   const s = p.spinner();
   s.start("Fetching balances");
   let tokens: TokenBalance[];
   try {
-    tokens = await salt.getAccountTokens(accountId, { networks: SEND_NETWORK_IDS });
+    tokens = await fetchAccountTokens(account.evmAddress, { networks: SEND_NETWORK_IDS });
     s.stop("Balances fetched");
   } catch (err) {
     s.stop("Failed to fetch balances");

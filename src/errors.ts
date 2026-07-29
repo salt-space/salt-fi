@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import {
   ApiError,
-  InsufficientGas,
+  InsufficientFunds,
   InsufficientPermissions,
   InvalidAddress,
   InvalidAuthToken,
@@ -37,7 +37,7 @@ export function formatSaltError(err: unknown): string {
   if (err instanceof WrongChain) {
     return "Your wallet is connected to the wrong chain for this environment (expected Arbitrum Sepolia, 421614).";
   }
-  if (err instanceof InsufficientGas) {
+  if (err instanceof InsufficientFunds) {
     return "The signer doesn't have enough gas on Arbitrum Sepolia to complete this action.";
   }
   if (err instanceof RoboStatusError) {
