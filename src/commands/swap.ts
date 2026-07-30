@@ -41,7 +41,7 @@ interface SubmitParams {
   value: bigint;
   data: string;
   chainId: number;
-  userAddress: string;
+  userAddress: Address;
   walletClient: SaltWalletClient;
   publicClient: PublicClient;
 }
