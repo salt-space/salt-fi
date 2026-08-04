@@ -5,6 +5,7 @@ import { accountBalancesFlow } from "./commands/balances.js";
 import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
+import { hyperliquidFlow } from "./commands/hyperliquid.js";
 import { manageInvitations } from "./commands/invitations.js";
 import { listenForNudgesFlow } from "./commands/nudges.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
@@ -111,6 +112,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "accounts", label: "Accounts ▸" },
         { value: "assets", label: "Assets ▸" },
         { value: "policies", label: "Policies ▸" },
+        { value: "hyperliquid", label: "Hyperliquid", hint: "coming soon" },
         { value: EXIT, label: "Exit" },
       ],
     });
@@ -123,7 +125,9 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
     const outcome =
       choice === "getting-started"
         ? await execute(() => gettingStartedFlow(salt, walletClient))
-        : await openSubmenu(groups[choice].title, groups[choice].entries);
+        : choice === "hyperliquid"
+          ? await execute(() => hyperliquidFlow())
+          : await openSubmenu(groups[choice].title, groups[choice].entries);
 
     if (outcome === "exit-app") return;
   }
