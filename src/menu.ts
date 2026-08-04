@@ -10,7 +10,7 @@ import { listenForNudgesFlow } from "./commands/nudges.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
 import { policyChatFlow } from "./commands/policy-chat.js";
 import { policyManagementFlow } from "./commands/policy-management.js";
-import { checkRoboStatusFlow } from "./commands/robos.js";
+import { activateRoboFlow, checkRoboStatusFlow } from "./commands/robos.js";
 import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
 import { isAuthExpired } from "./errors.js";
@@ -70,6 +70,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       title: "Robo Guardians",
       entries: [
         { value: "robo-setup", label: "Set up Robo Guardians", run: () => setUpRoboFlow(salt, walletClient) },
+        { value: "robo-activate", label: "Activate Robo Guardians (2FA)", hint: "required after setup — robos can't sign until activated", run: () => activateRoboFlow(salt, walletClient) },
         { value: "robo-status", label: "Check robo guardians", run: () => checkRoboStatusFlow(salt) },
       ],
     },

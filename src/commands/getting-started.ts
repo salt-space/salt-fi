@@ -6,6 +6,7 @@ import type { SaltWalletClient } from "../wallet.js";
 import { createAccountFlow } from "./accounts.js";
 import { createOrganisationFlow, setUpRoboHost } from "./create-organisation.js";
 import { inviteMemberFlow } from "./organisations.js";
+import { activateRoboFlow } from "./robos.js";
 import { addPolicy } from "./policy-management.js";
 
 const TOTAL_STEPS = 5;
@@ -190,24 +191,51 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
       "policies.",
   );
 
+  const roboActive = async () => {
+    try {
+      return (await salt.getRoboStatus({ organisationId: organisationId! })).active;
+    } catch {
+      return false;
+    }
+  };
+
   if (alreadyHasAccount) {
-    p.log.success("Already done — this organisation has Robo Guardians set up (an account exists).");
-  } else if ((await roboOnlineCount()) > 0) {
-    p.log.success("At least one Robo Guardian is already online.");
+    // An account can't exist unless the robos were activated for its keygen, so
+    // both setup and activation are already done.
+    p.log.success("Already done — this organisation has Robo Guardians set up and activated (an account exists).");
   } else {
-    const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o._id === organisationId)?.name ?? "your organisation");
-    // Escaping robo setup should leave the wizard entirely, not fall through to
-    // polling for robos that were never set up.
-    if (!roboSetUp) return;
-    p.log.info("Once the host is running (script executed, or CloudFormation stack launched), the robos come online.");
-    const gate = await waitForGate(
-      async () => {
-        const online = await roboOnlineCount();
-        return { done: online > 0, message: `Waiting for a Robo Guardian to come online — ${online} online` };
-      },
-      { readyLabel: "A Robo Guardian is online" },
-    );
-    if (gate === "exit") return;
+    // 3a. Ensure a robo host is set up and at least one signer is online.
+    if ((await roboOnlineCount()) > 0) {
+      p.log.success("At least one Robo Guardian is already online.");
+    } else {
+      const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o._id === organisationId)?.name ?? "your organisation");
+      // Escaping robo setup should leave the wizard entirely, not fall through to
+      // polling for robos that were never set up.
+      if (!roboSetUp) return;
+      p.log.info("Once the host is running (script executed, or CloudFormation stack launched), the robos come online.");
+      const gate = await waitForGate(
+        async () => {
+          const online = await roboOnlineCount();
+          return { done: online > 0, message: `Waiting for a Robo Guardian to come online — ${online} online` };
+        },
+        { readyLabel: "A Robo Guardian is online" },
+      );
+      if (gate === "exit") return;
+    }
+
+    // 3b. Activate the host (2FA). Provisioned + online is NOT enough — an
+    // un-activated host can't join keygen, so account creation (step 4) would
+    // fail with a RoboStatusError. Do it here so the wizard never stalls there.
+    if (await roboActive()) {
+      p.log.success("Robo Guardians are activated (2FA complete).");
+    } else {
+      p.log.info("Robos are online but not yet activated — completing 2FA activation now.");
+      await activateRoboFlow(salt, walletClient, organisationId);
+      if (!(await roboActive())) {
+        p.log.info('Robo host still not activated — finish via "Robo Guardians → Activate Robo Guardians", then re-run getting started.');
+        return;
+      }
+    }
   }
 
   // --- Step 4: Account ------------------------------------------------------
