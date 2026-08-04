@@ -41,7 +41,13 @@ export function formatSaltError(err: unknown): string {
     return "The signer doesn't have enough gas on Arbitrum Sepolia to complete this action.";
   }
   if (err instanceof RoboStatusError) {
-    return 'One or more of this account\'s Robo Guardians are offline. Use "Check robo status" to see which, then retry once they\'re back online.';
+    // The SDK deliberately leaves `cause`/`code` empty and puts the actionable
+    // detail in `message` — e.g. "… host is not active. Activate your host via
+    // 2FA Flow" (needs activation) vs "robo quorum not met … (need N, M online)"
+    // (offline). Surfacing our own generic "…offline…" text hid the activation
+    // case entirely, which is the usual reason people get stuck. Pass it through,
+    // with a pointer to where the fixes live.
+    return `${err.message}\n(Robo Guardians → "Activate Robo Guardians" to complete 2FA, or "Check robo guardians" to see who's online.)`;
   }
   if (err instanceof InvalidAddress) {
     return "That's not a valid address.";
