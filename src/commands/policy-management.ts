@@ -506,7 +506,7 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
     return;
   }
 
-  const resolveLabel = buildResolveLabel(accounts, organisation.members);
+  const resolveLabel = buildResolveLabel(accounts, organisation.collaborators);
 
   // Per Salt's access levels (owner/member/agent/member-no-permissions), only
   // an owner may add/edit/delete policies — member and agent are view-only.
@@ -514,7 +514,7 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
   // agent's account list) — that's left to the API/server to enforce, so it
   // can be verified independently rather than duplicated client-side.
   const selfAddress = walletClient.account.address;
-  const self = organisation.members.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
+  const self = organisation.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
   const canEdit = self?.accessLevel === 1;
   if (!canEdit) {
     p.log.info("You have view-only access to policies — adding, editing, and deleting are owner-only.");

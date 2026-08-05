@@ -298,7 +298,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   }
 
   const isOwner =
-    organisation.members.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase())?.accessLevel === 1;
+    organisation.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase())?.accessLevel === 1;
 
   const eligibleAccounts = accounts.filter(
     (account) =>

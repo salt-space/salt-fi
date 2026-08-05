@@ -20,13 +20,13 @@ describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testne
       name: `IT lifecycle ${Date.now()}`,
       owner: { name: "IT Owner", address: owner.address, role: "Owner" },
     });
-    expect(org._id).toBeTruthy();
-    orgId = org._id;
+    expect(org.id).toBeTruthy();
+    orgId = org.id;
   });
 
   it.skipIf(!hasCollabKey())("invites a collaborator, who accepts and goes Active", async () => {
     const collab = await authedSalt(testKey("TEST_COLLAB_KEY")!);
-    await owner.salt.inviteMember(orgId, {
+    await owner.salt.inviteCollaborator(orgId, {
       address: collab.address,
       name: "IT Collaborator",
       role: "Signer",
@@ -41,7 +41,7 @@ describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testne
     let active = false;
     for (let i = 0; i < 20 && !active; i++) {
       const { organisation } = await owner.salt.getOrganisationById(orgId);
-      active = organisation.members.some(
+      active = organisation.collaborators.some(
         (m) => m.address.toLowerCase() === collab.address.toLowerCase() && m.status === "Active",
       );
       if (!active) await new Promise((r) => setTimeout(r, 3000));

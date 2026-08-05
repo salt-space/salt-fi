@@ -40,7 +40,7 @@ export async function pickOrganisation(salt: Salt, message: string): Promise<str
 
   const organisationId = await select({
     message,
-    options: organisations.map((org) => ({ value: org._id, label: org.name })),
+    options: organisations.map((org) => ({ value: org.id, label: org.name })),
   });
 
   if (p.isCancel(organisationId)) return undefined;

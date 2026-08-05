@@ -94,7 +94,7 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
   let ownedOrgs: Awaited<ReturnType<Salt["getOrganisations"]>> = [];
   try {
     ownedOrgs = (await salt.getOrganisations()).filter((org) =>
-      org.members.some((m) => m.address.toLowerCase() === selfAddress.toLowerCase() && m.accessLevel === 1),
+      org.collaborators.some((m) => m.address.toLowerCase() === selfAddress.toLowerCase() && m.accessLevel === 1),
     );
   } catch {
     ownedOrgs = [];
@@ -106,7 +106,7 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
       message: "You already own organisations — continue with one, or start fresh?",
       options: [
         { value: CREATE, label: "Create a new organisation" },
-        ...ownedOrgs.map((org) => ({ value: org._id, label: org.name, hint: "continue setup" })),
+        ...ownedOrgs.map((org) => ({ value: org.id, label: org.name, hint: "continue setup" })),
       ],
     });
     if (p.isCancel(choice)) return;
@@ -142,7 +142,7 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
 
   const activeCount = async () => {
     const { organisation } = await salt.getOrganisationById(organisationId!);
-    return organisation.members.filter((m) => m.status === "Active").length;
+    return organisation.collaborators.filter((m) => m.status === "Active").length;
   };
 
   if ((await activeCount()) < 2) {
@@ -208,7 +208,7 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
     if ((await roboOnlineCount()) > 0) {
       p.log.success("At least one Robo Guardian is already online.");
     } else {
-      const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o._id === organisationId)?.name ?? "your organisation");
+      const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o.id === organisationId)?.name ?? "your organisation");
       // Escaping robo setup should leave the wizard entirely, not fall through to
       // polling for robos that were never set up.
       if (!roboSetUp) return;
@@ -272,11 +272,11 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
   try {
     ({ organisation } = await salt.getOrganisationById(organisationId));
   } catch {
-    organisation = { members: [] as { address: string; name?: string }[] };
+    organisation = { collaborators: [] as { address: string; name?: string }[] };
   }
   const addFirst = await p.confirm({ message: `Add a policy to "${account.name}" now?` });
   if (!p.isCancel(addFirst) && addFirst) {
-    await addPolicy(salt, account.id, organisationId, buildResolveLabel(accounts, organisation.members));
+    await addPolicy(salt, account.id, organisationId, buildResolveLabel(accounts, organisation.collaborators));
   }
 
   // --- Done -----------------------------------------------------------------

@@ -9,16 +9,16 @@ describe.skipIf(!hasOwnerKey())("integration · organisations (testnet)", () => 
   });
 
   // Read path — always safe to run (no state created). Pins the testnet org
-  // contract: `_id` + `members` (the staging mirror drifted these to `id` +
-  // `collaborators`, so this doubles as a regression guard if that ever ships
-  // to the public backend).
-  it("getOrganisations returns orgs shaped { _id, name, members[] }", async () => {
+  // contract as of salt-sdk 0.0.37: `id` + `collaborators` (renamed from the
+  // pre-0.0.37 `_id` + `members`). Doubles as a regression guard against
+  // reverting to the old names.
+  it("getOrganisations returns orgs shaped { id, name, collaborators[] }", async () => {
     const orgs = await ctx.salt.getOrganisations();
     expect(Array.isArray(orgs)).toBe(true);
     for (const org of orgs) {
-      expect(org._id, "org._id present (not `id`)").toBeTruthy();
+      expect(org.id, "org.id present (renamed from `_id` in 0.0.37)").toBeTruthy();
       expect(org.name).toBeTypeOf("string");
-      expect(Array.isArray(org.members), "org.members is an array (not `collaborators`)").toBe(true);
+      expect(Array.isArray(org.collaborators), "org.collaborators is an array (renamed from `members`)").toBe(true);
     }
   });
 
@@ -28,13 +28,13 @@ describe.skipIf(!hasOwnerKey())("integration · organisations (testnet)", () => 
       // Nothing to fetch for this identity — the read contract above still ran.
       return;
     }
-    const { organisation } = await ctx.salt.getOrganisationById(orgs[0]._id);
-    expect(organisation._id).toBe(orgs[0]._id);
+    const { organisation } = await ctx.salt.getOrganisationById(orgs[0].id);
+    expect(organisation.id).toBe(orgs[0].id);
     expect(organisation.name).toBe(orgs[0].name);
-    expect(Array.isArray(organisation.members)).toBe(true);
-    for (const m of organisation.members) {
-      expect(m.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
-      expect(["Active", "Invited", "Declined", "Removed"]).toContain(m.status);
+    expect(Array.isArray(organisation.collaborators)).toBe(true);
+    for (const c of organisation.collaborators) {
+      expect(c.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(["Active", "Invited", "Declined", "Removed"]).toContain(c.status);
     }
   });
 
@@ -46,10 +46,10 @@ describe.skipIf(!hasOwnerKey())("integration · organisations (testnet)", () => 
         name,
         owner: { name: "Integration Owner", address: ctx.address, role: "Owner" },
       });
-      expect(org._id).toBeTruthy();
+      expect(org.id).toBeTruthy();
       expect(org.name).toBe(name);
       const after = await ctx.salt.getOrganisations();
-      expect(after.some((o) => o._id === org._id)).toBe(true);
+      expect(after.some((o) => o.id === org.id)).toBe(true);
     });
   });
 });

@@ -71,25 +71,25 @@ export async function createOrganisationFlow(
       name: orgName,
       owner: { name: ownerName, address: selfAddress, role: ownerRole },
     });
-    s.stop(`Organisation created: ${organisation.name} (${organisation._id})`);
+    s.stop(`Organisation created: ${organisation.name} (${organisation.id})`);
   } catch (err) {
     s.stop("Failed to create organisation");
     reportError(err);
     return;
   }
 
-  if (options.skipRoboSetup) return organisation._id;
+  if (options.skipRoboSetup) return organisation.id;
 
   const setUpRobos = await p.confirm({
     message: "Set up Robo Guardians for this organisation now?",
   });
   if (p.isCancel(setUpRobos) || !setUpRobos) {
     p.log.info('You can set this up later from "Robo Guardians → Set up Robo Guardians".');
-    return organisation._id;
+    return organisation.id;
   }
 
-  await setUpRoboHost(salt, walletClient, organisation._id, organisation.name);
-  return organisation._id;
+  await setUpRoboHost(salt, walletClient, organisation.id, organisation.name);
+  return organisation.id;
 }
 
 /** Menu entry: pick an organisation, then set up (or re-issue) its Robo Guardian host. */
