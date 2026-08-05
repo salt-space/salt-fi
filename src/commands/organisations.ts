@@ -31,9 +31,9 @@ export async function listOrganisations(salt: Salt, selfAddress: string): Promis
     }
 
     for (const org of organisations) {
-      const self = org.members.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
+      const self = org.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
       const role = self ? (ACCESS_LEVEL_LABEL[self.accessLevel] ?? String(self.accessLevel)) : "unknown";
-      p.log.message(`${org.name}  (${org._id})\n  your role: ${role}  •  collaborators: ${org.members.length}`);
+      p.log.message(`${org.name}  (${org.id})\n  your role: ${role}  •  collaborators: ${org.collaborators.length}`);
     }
   } catch (err) {
     s.stop("Failed to fetch organisations");
@@ -86,7 +86,7 @@ export async function inviteMemberFlow(salt: Salt, preselectedOrganisationId?: s
   const s = p.spinner();
   s.start("Sending invitation");
   try {
-    await salt.inviteMember(organisationId, { address, name, role, accessLevel });
+    await salt.inviteCollaborator(organisationId, { address, name, role, accessLevel });
     s.stop("Invitation sent");
     return true;
   } catch (err) {
@@ -108,14 +108,14 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
     return;
   }
 
-  if (organisation.members.length === 0) {
+  if (organisation.collaborators.length === 0) {
     p.log.info("No collaborators in this organisation yet.");
     return;
   }
 
   const memberAddress = await select({
     message: "Edit which collaborator?",
-    options: organisation.members.map((member) => ({
+    options: organisation.collaborators.map((member) => ({
       value: member.address,
       label: member.name || member.address,
       hint: `${ACCESS_LEVEL_LABEL[member.accessLevel] ?? member.accessLevel} · ${member.role} · ${member.status}`,
@@ -123,11 +123,11 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
   });
   if (p.isCancel(memberAddress)) return;
 
-  const member = organisation.members.find((m) => m.address === memberAddress)!;
+  const member = organisation.collaborators.find((m) => m.address === memberAddress)!;
 
   const name = await p.text({
     message: "Display name",
-    initialValue: member.name,
+    initialValue: member.name ?? undefined,
     validate: (value) => (!value || value.trim().length === 0 ? "Name is required" : undefined),
   });
   if (p.isCancel(name)) return;
@@ -154,7 +154,7 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
   const s = p.spinner();
   s.start("Updating collaborator");
   try {
-    await salt.updateMember(organisationId, memberAddress, { name, role, accessLevel });
+    await salt.updateCollaborator(organisationId, memberAddress, { name, role, accessLevel });
     s.stop("Collaborator updated");
   } catch (err) {
     s.stop("Failed to update collaborator");

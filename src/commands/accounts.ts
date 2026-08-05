@@ -48,10 +48,10 @@ export async function createAccountFlow(
   }
 
   const memberNameByAddress = new Map(
-    organisation.members.map((member) => [member.address.toLowerCase(), member.name || member.address]),
+    organisation.collaborators.map((member) => [member.address.toLowerCase(), member.name || member.address]),
   );
 
-  const otherActiveMembers = organisation.members.filter(
+  const otherActiveMembers = organisation.collaborators.filter(
     (member) => member.status === "Active" && member.address.toLowerCase() !== selfAddress.toLowerCase(),
   );
 

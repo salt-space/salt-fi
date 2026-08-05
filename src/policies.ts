@@ -15,7 +15,7 @@ export type ResolveLabel = (address: string) => string | undefined;
  */
 export function buildResolveLabel(
   accounts: { evmAddress?: string; name: string }[],
-  members: { address: string; name?: string }[],
+  members: { address: string; name?: string | null }[],
 ): ResolveLabel {
   const byAddress = new Map<string, string>();
   for (const account of accounts) if (account.evmAddress) byAddress.set(account.evmAddress.toLowerCase(), account.name);
