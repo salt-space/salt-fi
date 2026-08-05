@@ -7,4 +7,5 @@ dist/
 .DS_Store
 .claude/settings.local.json
 .salt-session.json
+.hyperliquid-agents.json
 robo-setup-*.sh
