@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList } from "../prompts.js";
+import { ensureSignerPublicKey } from "../session.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 export async function listAccounts(salt: Salt): Promise<void> {
@@ -86,6 +87,13 @@ export async function createAccountFlow(
   });
   if (p.isCancel(confirmed) || !confirmed) return;
 
+  // Account creation backs up a keyshare, which needs the signer's public key. That key
+  // is recovered during a live `authenticate()` and kept in memory on this Salt instance
+  // — it is NOT carried by a session restored from a cached auth token. So re-authenticate
+  // here if needed, otherwise the backup step fails with
+  // "Cannot back up a keyshare without the owner public key".
+  await ensureSignerPublicKey(salt, walletClient);
+
   const s = p.spinner();
   s.start("Starting account creation ceremony");
   let renudge: ReturnType<typeof setInterval> | undefined;
@@ -132,8 +140,17 @@ export async function createAccountFlow(
     }, 15_000);
 
     const { account } = await ceremony.wait();
+    // publicKey/evmAddress can lag the ceremony result by a moment (the account is
+    // created — it has an id — but finalization propagates a beat later). Poll getAccounts
+    // until it's finalized so we display the real address instead of `undefined`/`null`.
+    let finalized = account;
+    for (let i = 0; i < 12 && !(finalized.publicKey && finalized.evmAddress); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const accounts = await salt.getAccounts(organisationId);
+      finalized = accounts.find((a) => a.id === account.id) ?? finalized;
+    }
     s.stop("Account created");
-    p.log.success(`${account.name}  (${account.id})\n  address: ${account.evmAddress}\n  public key: ${account.publicKey}`);
+    p.log.success(`${finalized.name}  (${finalized.id})\n  address: ${finalized.evmAddress ?? "(finalizing…)"}\n  public key: ${finalized.publicKey ?? "(finalizing…)"}`);
   } catch (err) {
     s.stop("Account creation failed");
     reportError(err);
