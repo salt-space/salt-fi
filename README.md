@@ -113,8 +113,12 @@ You'll need these installed on your machine first:
    ```
    npm run dev
    ```
-   This signs you in and drops you into the interactive menu. First-time
-   users should pick **Getting started** for a guided walkthrough.
+   This asks which environment to use — **Testnet** (default) or **Mainnet**
+   (real funds; it asks you to confirm) — then signs you in and drops you into
+   the interactive menu. First-time users should pick **Getting started** for a
+   guided walkthrough. To skip the prompt, launch a specific environment
+   directly with `npm run dev:testnet` or `npm run dev:mainnet` (these also
+   accept `SALT_ENV=testnet|mainnet` in your `.env`).
 
 ### Running as two identities at once
 
@@ -137,8 +141,11 @@ entry.
 
 ## Usage
 
-`npm run dev` signs you in with SIWE (against `testnet.salt.space`, TESTNET's
-privileged domain) and drops you into an interactive menu. It's grouped, with a
+`npm run dev` asks which environment to use, then signs you in with SIWE
+(against that environment's privileged domain — `testnet.salt.space` for
+Testnet, `app.salt.space` for Mainnet) and drops you into an interactive menu.
+The launch banner names the environment, and mainnet is flagged with a real-funds
+warning so you always know which network you're on. It's grouped, with a
 guided walkthrough at the top and the individual tools organised into submenus.
 
 - **Getting started** — a guided, five-step walkthrough that teaches each Salt
