@@ -140,8 +140,17 @@ export async function createAccountFlow(
     }, 15_000);
 
     const { account } = await ceremony.wait();
+    // publicKey/evmAddress can lag the ceremony result by a moment (the account is
+    // created — it has an id — but finalization propagates a beat later). Poll getAccounts
+    // until it's finalized so we display the real address instead of `undefined`/`null`.
+    let finalized = account;
+    for (let i = 0; i < 12 && !(finalized.publicKey && finalized.evmAddress); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const accounts = await salt.getAccounts(organisationId);
+      finalized = accounts.find((a) => a.id === account.id) ?? finalized;
+    }
     s.stop("Account created");
-    p.log.success(`${account.name}  (${account.id})\n  address: ${account.evmAddress}\n  public key: ${account.publicKey}`);
+    p.log.success(`${finalized.name}  (${finalized.id})\n  address: ${finalized.evmAddress ?? "(finalizing…)"}\n  public key: ${finalized.publicKey ?? "(finalizing…)"}`);
   } catch (err) {
     s.stop("Account creation failed");
     reportError(err);
