@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
+import { network } from "../env.js";
 import { buildResolveLabel } from "../policies.js";
 import { select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
@@ -283,7 +284,10 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
   p.note(
     "That's the full setup: organisation, collaborators, Robo Guardians, an\n" +
       "account, and a policy protecting it.\n\n" +
-      'Next: fund the account ("Faucet for Salt accounts"), then Send or Swap.',
+      // The faucet item is testnet-only (hidden on mainnet), so only name it there.
+      (network.saltEnv === "mainnet"
+        ? "Next: fund the account, then Send or Swap."
+        : 'Next: fund the account ("Faucet for Salt accounts"), then Send or Swap.'),
     "You're set up",
   );
 }

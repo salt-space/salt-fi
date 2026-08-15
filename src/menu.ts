@@ -13,6 +13,7 @@ import { policyManagementFlow } from "./commands/policy-management.js";
 import { activateRoboFlow, checkRoboStatusFlow } from "./commands/robos.js";
 import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
+import { network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
 import { select } from "./prompts.js";
 import { clearStoredSession } from "./session.js";
@@ -86,7 +87,10 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       title: "Assets",
       entries: [
         { value: "balances", label: "View balances", hint: "token holdings per account", run: () => accountBalancesFlow(salt) },
-        { value: "faucet", label: "Faucet for Salt accounts", run: () => faucetFlow(salt) },
+        // Faucets are testnet-only — hide the item on mainnet, where it makes no sense.
+        ...(network.saltEnv === "mainnet"
+          ? []
+          : [{ value: "faucet", label: "Faucet for Salt accounts", run: () => faucetFlow(salt) }]),
         { value: "send", label: "Send assets", run: () => sendTransactionFlow(salt, walletClient) },
         { value: "swap", label: "Swap assets", run: () => swapFlow(salt, walletClient) },
       ],
