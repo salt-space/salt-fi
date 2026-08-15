@@ -1,7 +1,8 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
+import { backupStatusLabel, verifyKeyshareBackup } from "../backup-status.js";
 import { reportError } from "../errors.js";
-import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList } from "../prompts.js";
+import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList, select } from "../prompts.js";
 import { ensureSignerPublicKey } from "../session.js";
 import type { SaltWalletClient } from "../wallet.js";
 
@@ -21,7 +22,11 @@ export async function listAccounts(salt: Salt): Promise<void> {
     }
 
     for (const account of accounts) {
-      p.log.message(`${account.name}  (${account.id})\n  address: ${account.evmAddress ?? "pending setup"}`);
+      // `backupStatusLabel` reads the account's publicKey + keyshares map — the
+      // typed replacement for the removed `keysharesBackedUp` response field.
+      p.log.message(
+        `${account.name}  (${account.id})\n  address: ${account.evmAddress ?? "pending setup"}\n  backup: ${backupStatusLabel(account)}`,
+      );
     }
   } catch (err) {
     s.stop("Failed to fetch accounts");
@@ -150,11 +155,63 @@ export async function createAccountFlow(
       finalized = accounts.find((a) => a.id === account.id) ?? finalized;
     }
     s.stop("Account created");
-    p.log.success(`${finalized.name}  (${finalized.id})\n  address: ${finalized.evmAddress ?? "(finalizing…)"}\n  public key: ${finalized.publicKey ?? "(finalizing…)"}`);
+    p.log.success(
+      `${finalized.name}  (${finalized.id})\n  address: ${finalized.evmAddress ?? "(finalizing…)"}\n  public key: ${finalized.publicKey ?? "(finalizing…)"}\n  backup: ${backupStatusLabel(finalized)}`,
+    );
   } catch (err) {
     s.stop("Account creation failed");
     reportError(err);
   } finally {
     if (renudge) clearInterval(renudge);
+  }
+}
+
+/**
+ * Verify an account's keyshare backup — the *active* check. Where {@link listAccounts}
+ * reads the passive backed-up signal off the account object (publicKey + keyshares),
+ * this asks Salt to actually exercise the shares via `verifyAccount`, proving the
+ * account is recoverable. This is the reliable replacement for the removed
+ * `keysharesBackedUp` API field.
+ */
+export async function verifyAccountBackupFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  const organisationId = await pickOrganisation(salt, "Verify a backup in which organisation?");
+  if (!organisationId) return;
+
+  let accounts;
+  try {
+    accounts = await salt.getAccounts(organisationId);
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+
+  // Only finalized accounts (publicKey set) can be verified.
+  const verifiable = accounts.filter((account) => Boolean(account.publicKey));
+  if (verifiable.length === 0) {
+    p.log.info("No finalized accounts in this organisation to verify.");
+    return;
+  }
+
+  const accountId = await select({
+    message: "Verify which account's backup?",
+    options: verifiable.map((account) => ({
+      value: account.id,
+      label: account.name,
+      hint: `${account.evmAddress ?? account.id} · ${backupStatusLabel(account)}`,
+    })),
+  });
+  if (p.isCancel(accountId)) return;
+
+  const account = verifiable.find((a) => a.id === accountId);
+  if (!account) return;
+
+  const s = p.spinner();
+  s.start("Verifying keyshare backup (running recovery + regular signing)");
+  const ok = await verifyKeyshareBackup(salt, account.id, walletClient);
+  s.stop(ok ? "Backup verified" : "Backup verification failed");
+  if (ok) {
+    p.log.success(`${account.name} is backed up and recoverable — its keyshares produce a valid signature.`);
+  } else {
+    p.log.error(`Could not verify ${account.name}'s backup. Confirm you're a signer on this account, then retry.`);
   }
 }
