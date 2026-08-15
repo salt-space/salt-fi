@@ -75,3 +75,25 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
   writeStoredSession(address, { authToken, refreshToken: salt.getRefreshToken() ?? undefined });
   return salt;
 }
+
+/**
+ * Ensure this Salt instance has a **live-authenticated signer public key** before an
+ * operation that backs up a keyshare — i.e. before {@link Salt.createAccount}.
+ *
+ * The SDK recovers the signer's public key during `authenticate()` (from the SIWE
+ * signature) and holds it IN MEMORY on the instance as {@link Salt.userPublicKey}. It
+ * is deliberately NOT stored in the cached auth token — so a session rehydrated from a
+ * cached token (the fast path in {@link loadSalt}) has a valid JWT but no public key,
+ * and account creation's keyshare backup then fails with:
+ *
+ *   "Cannot back up a keyshare without the owner public key. It is recovered during
+ *    `Salt.authenticate`; a session restored from a stored auth token does not carry it."
+ *
+ * Calling this right before `createAccount` re-authenticates only when the public key
+ * is missing, so token caching still speeds up ordinary read calls.
+ */
+export async function ensureSignerPublicKey(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  if (!salt.userPublicKey) {
+    await salt.authenticate(walletClient);
+  }
+}

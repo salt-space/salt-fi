@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList } from "../prompts.js";
+import { ensureSignerPublicKey } from "../session.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 export async function listAccounts(salt: Salt): Promise<void> {
@@ -85,6 +86,13 @@ export async function createAccountFlow(
     message: `Create account "${name}" with signers:\n  ${signers.join("\n  ")}`,
   });
   if (p.isCancel(confirmed) || !confirmed) return;
+
+  // Account creation backs up a keyshare, which needs the signer's public key. That key
+  // is recovered during a live `authenticate()` and kept in memory on this Salt instance
+  // — it is NOT carried by a session restored from a cached auth token. So re-authenticate
+  // here if needed, otherwise the backup step fails with
+  // "Cannot back up a keyshare without the owner public key".
+  await ensureSignerPublicKey(salt, walletClient);
 
   const s = p.spinner();
   s.start("Starting account creation ceremony");
