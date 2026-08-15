@@ -4,6 +4,30 @@ A mini terminal app to get started using Salt's new SDK ([`salt-sdk`](https://ww
 
 Salt is in Beta — treat this project as subject to change.
 
+## Important notice
+
+**salt-fi is an independent open-source project maintained by its author in a personal capacity. It is not an official Salt product and is not part of Salt's supported product offering.**
+
+The maintainer of this project is also a founder of Salt. This repository is nevertheless independently maintained, and its releases, documentation and support should not be treated as official releases, documentation or support from Salt unless Salt expressly states otherwise.
+
+References to Salt, the Salt SDK, Salt APIs, Salt services and related names are made to describe this project's interoperability with the Salt platform. No licence to use Salt branding, trademarks, proprietary software or services is granted by this repository.
+
+> **Mainnet warning:** This software can interact with public blockchain networks and can initiate transactions involving assets with real economic value. Bugs, incorrect configuration, compromised credentials, third-party failures, smart-contract vulnerabilities or user error may result in the irreversible loss of digital assets.
+
+Use this software at your own risk. Review and verify addresses, transactions, permissions, policies, contract interactions and configuration before execution. Blockchain transactions may be irreversible once submitted.
+
+This project does not provide custody, asset recovery, transaction monitoring, financial guarantees or insurance. You are responsible for the security of your wallets, credentials, keys, devices and recovery methods.
+
+Unless expressly stated otherwise, this project has not been independently audited or formally verified.
+
+Nothing in this repository constitutes financial, investment, legal, tax, accounting, security or other professional advice. Nothing in this repository is an offer, solicitation, recommendation, endorsement or guarantee concerning any asset, protocol, transaction, strategy or service.
+
+This software may interact with third-party blockchains, protocols, smart contracts, APIs and services. Those systems are outside this project's control and may have their own terms, fees, security assumptions and risks.
+
+The software in this repository is provided **"AS IS"**, without warranties or guarantees of any kind. To the maximum extent permitted by applicable law, the author and contributors disclaim liability for losses or damages arising from the use of, or inability to use, this software.
+
+Use of the Salt SDK, Salt platform, APIs or other Salt services may be subject to separate terms, licences and policies provided by Salt.
+
 ## New to the terminal? Start here
 
 No experience needed — this section gets you comfortable before anything else.
@@ -81,6 +105,10 @@ You'll need these installed on your machine first:
      Salt covers the gas for those registry operations — the signer's wallet
      never pays gas; the accounts you create/hold assets in can live on many
      other supported testnets.
+
+   > ⚠️ **Mainnet security:** Use a dedicated signer/account with only the permissions and funds required for what you are doing. Do not paste the private key of a wallet holding significant assets into an unfamiliar environment, shared machine, shell history, source file or committed `.env` file.
+
+   `.env`, `.env.a`, `.env.b` and the session cache are gitignored — never commit a private key or a populated `.env` file.
 4. Run in dev mode:
    ```
    npm run dev
@@ -243,3 +271,11 @@ it's discarded automatically and you're prompted to restart if it expires.
 - `npm run dev` — run `src/index.ts` directly with `tsx`
 - `npm run build` — compile TypeScript to `dist/`
 - `npm start` — run the compiled output
+
+## License
+
+The source code in this repository is licensed under the [Apache License 2.0](./LICENSE).
+
+The licence applies only to the source code contained in this repository. It does not grant rights to Salt's trademarks, branding, proprietary software, hosted services, APIs or other intellectual property.
+
+Use of Salt products or services may be subject to separate terms provided by Salt.
