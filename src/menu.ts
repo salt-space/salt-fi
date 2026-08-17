@@ -110,7 +110,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       entries: [
         { value: "hl-getting-started", label: "Getting Started", run: () => hyperliquidGettingStartedFlow(salt, walletClient) },
         { value: "hl-move-funds", label: "Move Funds", run: () => hyperliquidMoveFundsFlow(salt, walletClient) },
-        { value: "hl-trade", label: "Trade", hint: "coming soon", run: () => hyperliquidTradeFlow() },
+        { value: "hl-trade", label: "Trade", run: () => hyperliquidTradeFlow(salt, walletClient) },
         { value: "hl-portfolio", label: "Portfolio", run: () => hyperliquidPortfolioFlow(salt, walletClient) },
         { value: "hl-positions", label: "Positions", run: () => hyperliquidPositionsFlow(salt, walletClient) },
       ],

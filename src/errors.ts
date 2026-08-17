@@ -11,6 +11,7 @@ import {
   ValidationError,
   WrongChain,
 } from "salt-sdk";
+import { CHAIN_NAME_BY_ID } from "./chains.js";
 
 /**
  * Whether `err` means the current session's token is expired/rejected and a
@@ -38,7 +39,13 @@ export function formatSaltError(err: unknown): string {
     return "Your wallet is connected to the wrong chain for this environment (expected Arbitrum Sepolia, 421614).";
   }
   if (err instanceof InsufficientFunds) {
-    return "The signer doesn't have enough gas on Arbitrum Sepolia to complete this action.";
+    // The SDK's own error already names the real chain this transaction was for — this app now
+    // submits transactions on more than just Arbitrum Sepolia (e.g. HyperEVM, chain 998, for
+    // Hyperliquid deposits), so a chain-agnostic message here matters, not just a nicety. Falls
+    // back to the bare chain id for anything not in CHAIN_NAME_BY_ID rather than guessing a name.
+    const chainId = (err as { details?: { chainId?: number } }).details?.chainId;
+    const chainName = chainId !== undefined ? (CHAIN_NAME_BY_ID[String(chainId)] ?? `chain ${chainId}`) : "the target chain";
+    return `The signer doesn't have enough gas on ${chainName} to complete this action. Deposit native currency to the account to proceed.`;
   }
   if (err instanceof RoboStatusError) {
     // The SDK deliberately leaves `cause`/`code` empty and puts the actionable
