@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { buildTransferTransaction, TransferType } from "salt-sdk";
 import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
-import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, SEND_NETWORK_IDS } from "../chains.js";
+import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
 import { fetchAccountTokens } from "../token-balances.js";
@@ -119,7 +119,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     p.log.error(`Unsupported chain ID: ${token.chainId}`);
     return;
   }
-  const publicClient = createPublicClient({ chain, transport: http() });
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl(token.chainId)) });
 
   // For native sends, leave room for gas so the amount prompt doesn't offer
   // (or accept) the full balance only to fail submitting. Doesn't need to be
