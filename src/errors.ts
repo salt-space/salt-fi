@@ -9,7 +9,6 @@ import {
   RoboStatusError,
   SocketConnectError,
   ValidationError,
-  WrongChain,
 } from "salt-sdk";
 
 /**
@@ -33,9 +32,6 @@ export function formatSaltError(err: unknown): string {
   }
   if (err instanceof InvalidSigner) {
     return "The wallet client has no attached signer account.";
-  }
-  if (err instanceof WrongChain) {
-    return "Your wallet is connected to the wrong chain for this environment (expected Arbitrum Sepolia, 421614).";
   }
   if (err instanceof InsufficientFunds) {
     return "The signer doesn't have enough gas on Arbitrum Sepolia to complete this action.";
