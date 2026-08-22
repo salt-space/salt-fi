@@ -1,13 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { network } from "../src/env.js";
 import { authedSalt, canWrite, hasCollabKey, hasOwnerKey, testKey, type SaltContext } from "./harness.js";
 
 /**
- * The formalized smoke test: the full onboarding lifecycle against testnet —
- * create org → invite → accept → robo host → (account creation). It creates
- * real testnet state, so it's opt-in behind `SALT_INTEGRATION_WRITE=1`; the
- * invite/account parts additionally need a second identity (`TEST_COLLAB_KEY`).
+ * The formalized smoke test: the full onboarding lifecycle against the selected
+ * environment (`SALT_ENV`, default testnet) — create org → invite → accept →
+ * robo host → (account creation). It creates real state on that network, so
+ * it's opt-in behind `SALT_INTEGRATION_WRITE=1`; the invite/account parts
+ * additionally need a second identity (`TEST_COLLAB_KEY`).
  */
-describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testnet · write)", () => {
+describe.skipIf(!canWrite() || !hasOwnerKey())(`integration · lifecycle (${network.label} · write)`, () => {
   let owner: SaltContext;
   let orgId: string;
 
@@ -49,7 +51,7 @@ describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testne
     expect(active, "collaborator reaches Active").toBe(true);
   });
 
-  it("registers a robo host, created inactive, with a testnet-correct setup script", async () => {
+  it("registers a robo host, created inactive, with an environment-correct setup script", async () => {
     let host = await owner.salt.getRoboHost({ organisationId: orgId }).catch(() => null);
     if (!host) {
       host = await owner.salt.createRoboHost({ name: "IT Robos", organisationId: orgId, ownerAddress: owner.address });
@@ -58,12 +60,14 @@ describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testne
     expect(host.active).toBe(false);
 
     // generateSetupScript needs the owner's public key (populated by the
-    // harness's authenticate()). Pin the testnet wiring — this guards against
-    // the mainnet-misconfig class of bug (app.salt.space / chain 42161 / INTU).
+    // harness's authenticate()). Assert the script targets whichever environment
+    // the suite is running against (derived from the same `network` source of
+    // truth as the client), guarding against the wrong-environment class of bug
+    // — a script silently pointed at a different Salt backend/chain than the
+    // account, which boots but never authenticates.
     const script = host.generateSetupScript({ publicKey: owner.salt.userPublicKey! });
-    expect(script).toContain('API_URL="https://testnet.salt.space/api"');
-    expect(script).toContain("SALT_CHAIN_ID=421614");
-    expect(script).not.toContain("INTU_NETWORK");
+    expect(script).toContain(`API_URL="https://${network.domain}/api"`);
+    expect(script).toContain(`SALT_CHAIN_ID=${network.shardRegistryChain.id}`);
   });
 
   it("reports robo status shaped { active, onlineCount, signers[] }", async () => {

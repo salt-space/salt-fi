@@ -1,5 +1,5 @@
 import { createPublicClient, erc20Abi, formatUnits, http, type Address } from "viem";
-import { CHAIN_BY_ID } from "./chains.js";
+import { CHAIN_BY_ID, rpcUrl } from "./chains.js";
 import { KNOWN_TOKENS_BY_CHAIN } from "./uniswap.js";
 
 const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -67,29 +67,42 @@ export async function fetchAccountTokens(
       balance: raw ? bal : formatUnits(bal, decimals),
     }) as TokenBalance | RawTokenBalance;
 
-  for (const chainId of networks) {
-    const chain = CHAIN_BY_ID[chainId];
-    if (!chain) continue;
-    const client = createPublicClient({ chain, transport: http() });
-    try {
-      const nativeBal = await client.getBalance({ address: account });
-      const nc = chain.nativeCurrency;
-      out.push(entry(NATIVE_ADDRESS, nc.symbol, nc.name, nc.decimals, nativeBal, chainId));
+  // Read every chain CONCURRENTLY with a short per-request timeout + a single retry,
+  // so one slow/rate-limited public RPC can't stall the whole fetch — it just gets
+  // skipped. Previously this ran sequentially on viem's default public RPCs with no
+  // timeout and 3 retries, so a couple of slow chains looked like a hang (worst on
+  // mainnet — 5 chains). Override the timeout with SALT_BALANCE_TIMEOUT_MS.
+  const timeout = Number(process.env.SALT_BALANCE_TIMEOUT_MS ?? 6000);
 
-      for (const t of KNOWN_TOKENS_BY_CHAIN[chainId] ?? []) {
-        try {
-          const [bal, decimals] = await Promise.all([
-            client.readContract({ address: t.address, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
-            client.readContract({ address: t.address, abi: erc20Abi, functionName: "decimals" }),
-          ]);
-          out.push(entry(t.address, t.symbol, t.symbol, Number(decimals), bal, chainId));
-        } catch {
-          /* skip a token whose contract read fails */
-        }
+  const perChain = await Promise.all(
+    networks.map(async (chainId): Promise<(TokenBalance | RawTokenBalance)[]> => {
+      const chain = CHAIN_BY_ID[chainId];
+      if (!chain) return [];
+      const client = createPublicClient({ chain, transport: http(rpcUrl(chainId), { timeout, retryCount: 1 }) });
+      const chainOut: (TokenBalance | RawTokenBalance)[] = [];
+      try {
+        const nativeBal = await client.getBalance({ address: account });
+        const nc = chain.nativeCurrency;
+        chainOut.push(entry(NATIVE_ADDRESS, nc.symbol, nc.name, nc.decimals, nativeBal, chainId));
+
+        const reads = (KNOWN_TOKENS_BY_CHAIN[chainId] ?? []).map(async (t) => {
+          try {
+            const [bal, decimals] = await Promise.all([
+              client.readContract({ address: t.address, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
+              client.readContract({ address: t.address, abi: erc20Abi, functionName: "decimals" }),
+            ]);
+            return entry(t.address, t.symbol, t.symbol, Number(decimals), bal, chainId);
+          } catch {
+            return null; // skip a token whose contract read fails
+          }
+        });
+        for (const r of await Promise.all(reads)) if (r) chainOut.push(r);
+      } catch {
+        /* skip a chain whose RPC is unreachable or times out */
       }
-    } catch {
-      /* skip a chain whose RPC is unreachable */
-    }
-  }
+      return chainOut;
+    }),
+  );
+  for (const c of perChain) out.push(...c);
   return out;
 }
