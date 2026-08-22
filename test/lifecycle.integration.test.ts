@@ -59,11 +59,12 @@ describe.skipIf(!canWrite() || !hasOwnerKey())("integration · lifecycle (testne
 
     // generateSetupScript needs the owner's public key (populated by the
     // harness's authenticate()). Pin the testnet wiring — this guards against
-    // the mainnet-misconfig class of bug (app.salt.space / chain 42161 / INTU).
+    // the mainnet-misconfig class of bug (a script pointed at the production
+    // backend instead of testnet).
     const script = host.generateSetupScript({ publicKey: owner.salt.userPublicKey! });
     expect(script).toContain('API_URL="https://testnet.salt.space/api"');
     expect(script).toContain("SALT_CHAIN_ID=421614");
-    expect(script).not.toContain("INTU_NETWORK");
+    expect(script).not.toContain("app.salt.space");
   });
 
   it("reports robo status shaped { active, onlineCount, signers[] }", async () => {
