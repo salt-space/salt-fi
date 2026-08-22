@@ -1,7 +1,7 @@
 {
   "name": "salt-fi",
   "version": "0.1.0",
-  "description": "Rebuild of KagamiDigital/salt-autofi on Salt's new SDK.",
+  "description": "A terminal app for getting started with the Salt SDK.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
