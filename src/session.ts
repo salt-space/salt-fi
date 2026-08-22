@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Salt } from "salt-sdk";
+import { network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
 import type { SaltWalletClient } from "./wallet.js";
 
-const SESSION_FILE = path.resolve(process.cwd(), ".salt-session.json");
-const DOMAIN = "testnet.salt.space";
+// Session cache is scoped per environment so a testnet token is never reused
+// against mainnet (or vice-versa) when switching SALT_ENV.
+const SESSION_FILE = path.resolve(process.cwd(), `.salt-session.${network.saltEnv}.json`);
+const DOMAIN = network.domain;
 
 type StoredSession = { authToken: string; refreshToken?: string };
 type StoredSessions = Record<string, StoredSession>;
@@ -48,7 +51,7 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
     // Pass the refresh token too so the SDK auto-refreshes an expired access
     // token; without it a cached session dies on expiry.
     const salt = new Salt({
-      environment: "TESTNET",
+      environment: network.environment,
       domain: DOMAIN,
       authToken: stored.authToken,
       refreshToken: stored.refreshToken,
@@ -70,7 +73,7 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
     }
   }
 
-  const salt = new Salt({ environment: "TESTNET", domain: DOMAIN });
+  const salt = new Salt({ environment: network.environment, domain: DOMAIN });
   const authToken = await salt.authenticate(walletClient);
   writeStoredSession(address, { authToken, refreshToken: salt.getRefreshToken() ?? undefined });
   return salt;
