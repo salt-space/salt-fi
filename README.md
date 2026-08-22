@@ -1,6 +1,6 @@
 # salt-fi
 
-A mini terminal app to get started using Salt's new SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
+A mini terminal app to get started with the Salt SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
 
 Salt is in Beta — treat this project as subject to change.
 
@@ -27,6 +27,8 @@ This software may interact with third-party blockchains, protocols, smart contra
 The software in this repository is provided **"AS IS"**, without warranties or guarantees of any kind. To the maximum extent permitted by applicable law, the author and contributors disclaim liability for losses or damages arising from the use of, or inability to use, this software.
 
 Use of the Salt SDK, Salt platform, APIs or other Salt services may be subject to separate terms, licences and policies provided by Salt.
+
+> **Terms of use.** By using this repository you agree to the [Salt Platform Suite Terms of Use](https://salt.space/terms/app/).
 
 ## New to the terminal? Start here
 
@@ -154,7 +156,7 @@ guided walkthrough at the top and the individual tools organised into submenus.
   when a step depends on something outside the terminal (a collaborator
   accepting an invite, a Robo Guardian coming online) it polls for a bit, then
   lets you exit and re-run later to continue. Aimed at first-time users; drawn
-  from the [Salt onboarding docs](https://kagamidigital.github.io/docs/documentation/using-salt/onboarding).
+  from the [Salt onboarding docs](https://docs.salt.space/documentation/using-salt/onboarding).
 
 ### Organisation
 
@@ -270,8 +272,8 @@ it's discarded automatically and you're prompted to restart if it expires.
 
 ## Docs
 
-- SDK docs: https://kagamidigital.github.io/docs/
-- TypeDoc/API reference: https://kagamidigital.github.io/salt-sdk-mirror/
+- SDK docs: https://docs.salt.space
+- API reference: https://developer.salt.space/sdk/
 
 ## Scripts
 
