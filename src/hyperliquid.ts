@@ -9,8 +9,8 @@ import { network } from "./env.js";
  * Per-environment Hyperliquid config, selected from `SALT_ENV` (via `network.saltEnv`). HyperEVM
  * testnet (998) and mainnet (999) are distinct chains with distinct HyperCore token identities,
  * spot markets and API hosts — every value below differs by network, so don't conflate them.
- * Testnet values were confirmed live during QA; mainnet token ids / evmContract / HYPE-USDC pair
- * index were read from live mainnet `/info` `spotMeta`.
+ * Testnet values were confirmed against the live testnet API; mainnet token ids / evmContract /
+ * HYPE-USDC pair index were read from live mainnet `/info` `spotMeta`.
  */
 interface HyperliquidEnv {
   apiUrl: string;

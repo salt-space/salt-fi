@@ -77,10 +77,10 @@ async function pickHyperliquidAccount(
 ): Promise<{ accountId: string; account: SaltAccount } | undefined> {
   const selfAddress = walletClient.account.address;
 
-  // Escape hatch for busy orgs (e.g. the perf bench, ~600+ accounts): set
-  // HL_ACCOUNT_ID to an account id or evm address to target it directly and
-  // skip the org + account pickers. Falls back to the pickers if it doesn't
-  // resolve to an eligible account you sign on.
+  // Escape hatch for orgs with a large number of accounts: set HL_ACCOUNT_ID to
+  // an account id or evm address to target it directly and skip the org + account
+  // pickers. Falls back to the pickers if it doesn't resolve to an eligible
+  // account you sign on.
   const pin = process.env.HL_ACCOUNT_ID?.toLowerCase();
   if (pin) {
     for (const org of await salt.getOrganisations()) {
