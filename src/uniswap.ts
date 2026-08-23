@@ -18,6 +18,41 @@ export const UNISWAP_V3_BY_CHAIN: Record<string, UniswapV3Deployment> = {
     quoterV2: "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
     weth: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
   },
+  // Mainnets — verified on-chain (factory/router/quoter have bytecode; the
+  // canonical WETH/USDC pool exists across all three fee tiers). Ethereum,
+  // Arbitrum, Optimism and Polygon share Uniswap's universal deployment
+  // addresses; Base has its own. `weth` is each chain's wrapped native.
+  "1": {
+    factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    swapRouter02: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+    quoterV2: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  },
+  "42161": {
+    factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    swapRouter02: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+    quoterV2: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    weth: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  },
+  "10": {
+    factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    swapRouter02: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+    quoterV2: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    weth: "0x4200000000000000000000000000000000000006",
+  },
+  "137": {
+    factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    swapRouter02: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+    quoterV2: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    // Wrapped native POL (symbol WPOL — formerly WMATIC).
+    weth: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+  },
+  "8453": {
+    factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+    swapRouter02: "0x2626664c2603336E57B271c5C0b26F421741e481",
+    quoterV2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+    weth: "0x4200000000000000000000000000000000000006",
+  },
 };
 
 /** Standard Uniswap v3 fee tiers, in hundredths of a bip (500 = 0.05%). */
@@ -28,6 +63,28 @@ export const KNOWN_TOKENS_BY_CHAIN: Record<string, { symbol: string; address: Ad
   "11155111": [
     { symbol: "WETH", address: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14" },
     { symbol: "USDC", address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
+  ],
+  // Mainnets — wrapped native + canonical/native USDC, both verified on-chain
+  // (symbol + a live WETH/USDC pool). Extend per chain as needed.
+  "1": [
+    { symbol: "WETH", address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" },
+    { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+  ],
+  "42161": [
+    { symbol: "WETH", address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1" },
+    { symbol: "USDC", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
+  ],
+  "10": [
+    { symbol: "WETH", address: "0x4200000000000000000000000000000000000006" },
+    { symbol: "USDC", address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85" },
+  ],
+  "137": [
+    { symbol: "WPOL", address: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270" },
+    { symbol: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
+  ],
+  "8453": [
+    { symbol: "WETH", address: "0x4200000000000000000000000000000000000006" },
+    { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
   ],
 };
 

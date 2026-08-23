@@ -9,7 +9,7 @@ import {
   type PublicClient,
   WaitForTransactionReceiptTimeoutError,
 } from "viem";
-import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl } from "../chains.js";
+import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl } from "../chains.js";
 import { formatSaltError, reportError } from "../errors.js";
 import { POLICY_TYPE_LABEL } from "../policies.js";
 import { pickOrganisation, select } from "../prompts.js";
@@ -326,7 +326,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   const deployment = UNISWAP_V3_BY_CHAIN[chainId];
   const chainName = CHAIN_NAME_BY_ID[chainId] ?? chainId;
   const chain = CHAIN_BY_ID[chainId];
-  const publicClient = createPublicClient({ chain, transport: http() });
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl(chainId)) });
 
   // --- sell token (from the account's own ERC-20 balances) ---
   const s = p.spinner();

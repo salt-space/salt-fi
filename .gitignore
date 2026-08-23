@@ -6,6 +6,9 @@ dist/
 !.env.example
 .DS_Store
 .claude/settings.local.json
-.salt-session.json
+.salt-session*.json
 .hyperliquid-agents.json
 robo-setup-*.sh
+
+# headless testnet smoke test state (contains disposable keys)
+.testnet-smoke.json

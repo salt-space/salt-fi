@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { formatSaltError, reportError } from "../errors.js";
+import { ensureSignerPublicKey } from "../session.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
@@ -8,6 +9,13 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
     message: "Start listening for account-setup nudges? Any ceremony you're nudged for will be joined automatically.",
   });
   if (p.isCancel(confirmed) || !confirmed) return;
+
+  // Joining a keygen ceremony backs up THIS signer's keyshare, which needs the signer's
+  // public key — recovered during a live `authenticate()` and held in memory on this Salt
+  // instance, NOT carried by a session restored from a cached auth token. Every keygen
+  // participant needs it, not just the proposer. Ensure it now so the join doesn't fail
+  // with "Cannot back up a keyshare without the owner public key".
+  await ensureSignerPublicKey(salt, walletClient);
 
   let listener;
   try {

@@ -1,7 +1,9 @@
 {
   "name": "salt-fi",
   "version": "0.1.0",
-  "description": "Rebuild of KagamiDigital/salt-autofi on Salt's new SDK.",
+  "description": "A terminal app for getting started with the Salt SDK.",
+  "author": "Tamlyn Rudolph",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -9,7 +11,10 @@
     "dev": "tsx src/index.ts",
     "dev:a": "cross-env DOTENV_CONFIG_PATH=.env.a tsx src/index.ts",
     "dev:b": "cross-env DOTENV_CONFIG_PATH=.env.b tsx src/index.ts",
+    "dev:testnet": "cross-env SALT_ENV=testnet tsx src/index.ts",
+    "dev:mainnet": "cross-env SALT_ENV=mainnet tsx src/index.ts",
     "start": "node dist/index.js",
+    "testnet-smoke": "tsx scripts/testnet-smoke.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -18,7 +23,7 @@
     "@clack/prompts": "^1.7.0",
     "@msgpack/msgpack": "^3.1.3",
     "dotenv": "^17.4.2",
-    "salt-sdk": "^0.0.37",
+    "salt-sdk": "^0.0.40",
     "viem": "^2.55.0"
   },
   "devDependencies": {

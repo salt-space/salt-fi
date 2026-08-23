@@ -9,7 +9,6 @@ import {
   RoboStatusError,
   SocketConnectError,
   ValidationError,
-  WrongChain,
 } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "./chains.js";
 
@@ -34,9 +33,6 @@ export function formatSaltError(err: unknown): string {
   }
   if (err instanceof InvalidSigner) {
     return "The wallet client has no attached signer account.";
-  }
-  if (err instanceof WrongChain) {
-    return "Your wallet is connected to the wrong chain for this environment (expected Arbitrum Sepolia, 421614).";
   }
   if (err instanceof InsufficientFunds) {
     // The SDK's own error already names the real chain this transaction was for — this app now

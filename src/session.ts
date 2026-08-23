@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Salt } from "salt-sdk";
+import { network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
 import type { SaltWalletClient } from "./wallet.js";
 
-const SESSION_FILE = path.resolve(process.cwd(), ".salt-session.json");
-const DOMAIN = "testnet.salt.space";
+// Session cache is scoped per environment so a testnet token is never reused
+// against mainnet (or vice-versa) when switching SALT_ENV.
+const SESSION_FILE = path.resolve(process.cwd(), `.salt-session.${network.saltEnv}.json`);
+const DOMAIN = network.domain;
 
 type StoredSession = { authToken: string; refreshToken?: string };
 type StoredSessions = Record<string, StoredSession>;
@@ -48,7 +51,7 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
     // Pass the refresh token too so the SDK auto-refreshes an expired access
     // token; without it a cached session dies on expiry.
     const salt = new Salt({
-      environment: "TESTNET",
+      environment: network.environment,
       domain: DOMAIN,
       authToken: stored.authToken,
       refreshToken: stored.refreshToken,
@@ -70,8 +73,30 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
     }
   }
 
-  const salt = new Salt({ environment: "TESTNET", domain: DOMAIN });
+  const salt = new Salt({ environment: network.environment, domain: DOMAIN });
   const authToken = await salt.authenticate(walletClient);
   writeStoredSession(address, { authToken, refreshToken: salt.getRefreshToken() ?? undefined });
   return salt;
+}
+
+/**
+ * Ensure this Salt instance has a **live-authenticated signer public key** before an
+ * operation that backs up a keyshare — i.e. before {@link Salt.createAccount}.
+ *
+ * The SDK recovers the signer's public key during `authenticate()` (from the SIWE
+ * signature) and holds it IN MEMORY on the instance as {@link Salt.userPublicKey}. It
+ * is deliberately NOT stored in the cached auth token — so a session rehydrated from a
+ * cached token (the fast path in {@link loadSalt}) has a valid JWT but no public key,
+ * and account creation's keyshare backup then fails with:
+ *
+ *   "Cannot back up a keyshare without the owner public key. It is recovered during
+ *    `Salt.authenticate`; a session restored from a stored auth token does not carry it."
+ *
+ * Calling this right before `createAccount` re-authenticates only when the public key
+ * is missing, so token caching still speeds up ordinary read calls.
+ */
+export async function ensureSignerPublicKey(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  if (!salt.userPublicKey) {
+    await salt.authenticate(walletClient);
+  }
 }
