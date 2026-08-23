@@ -1192,11 +1192,11 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
     return;
   }
 
+  // No verified-agent gate: an order can be signed by the account via a Salt MPC ceremony without
+  // an approved agent (same as the spot sell), and chooseOrderSigningMethod below offers the fast
+  // agent-key path only when one exists. `agentMeta` may be undefined — handled in the preview and
+  // the signer choice.
   const agentMeta = getAgentMetadata(accountId);
-  if (!agentMeta?.lastVerified) {
-    p.log.error('No verified trading agent on this account. Set one up first — Hyperliquid -> "Getting Started".');
-    return;
-  }
 
   // --- Market --------------------------------------------------------------------
   const s2 = p.spinner();
@@ -1338,7 +1338,7 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
     `This trade:         ${fmtUsd(margin)}`,
     `Remaining margin:   ~${fmtUsd(impact.remainingMargin)}`,
     "",
-    `Signing agent:      ${agentMeta.agentName}`,
+    `Signing:            ${agentMeta?.lastVerified ? `agent "${agentMeta.agentName}" or Salt MPC` : "Salt MPC ceremony"}`,
   );
   p.note(previewLines.join("\n"), "Trade preview");
 
