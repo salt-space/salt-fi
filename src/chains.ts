@@ -11,9 +11,22 @@ import {
   sepolia,
 } from "viem/chains";
 import { network } from "./env.js";
+import { HYPEREVM_CHAIN_ID, HYPEREVM_RPC_URL } from "./hyperliquid.js";
 
 // Chain IDs are globally unique, so testnet and mainnet chains coexist in one map —
 // the active set for "Send"/balances is chosen per environment below.
+
+/**
+ * The HyperEVM chain object other Hyperliquid code needs for a `publicClient`. Registered in the
+ * chain maps below (not in SEND_NETWORK_IDS — Send/Balances don't enumerate it) so chain-id-keyed
+ * lookups like `CHAIN_NAME_BY_ID` can name it instead of falling back to a bare number.
+ */
+export const hyperEvmTestnet: Chain = {
+  id: HYPEREVM_CHAIN_ID,
+  name: "HyperEVM Testnet",
+  nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+  rpcUrls: { default: { http: [HYPEREVM_RPC_URL] } },
+};
 export const CHAIN_BY_ID: Record<string, Chain> = {
   // Testnets
   "11155111": sepolia,
@@ -26,6 +39,8 @@ export const CHAIN_BY_ID: Record<string, Chain> = {
   "10": optimism,
   "137": polygon,
   "8453": base,
+  // HyperEVM
+  [String(HYPEREVM_CHAIN_ID)]: hyperEvmTestnet,
 };
 
 export const CHAIN_NAME_BY_ID: Record<string, string> = {
@@ -38,6 +53,7 @@ export const CHAIN_NAME_BY_ID: Record<string, string> = {
   "10": "Optimism",
   "137": "Polygon",
   "8453": "Base",
+  [String(HYPEREVM_CHAIN_ID)]: "HyperEVM Testnet",
 };
 
 /** The chains "Send"/balances scan, per environment. */

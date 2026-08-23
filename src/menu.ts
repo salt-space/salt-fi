@@ -6,6 +6,13 @@ import { accountBalancesFlow } from "./commands/balances.js";
 import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
+import {
+  hyperliquidGettingStartedFlow,
+  hyperliquidMoveFundsFlow,
+  hyperliquidPortfolioFlow,
+  hyperliquidPositionsFlow,
+  hyperliquidTradeFlow,
+} from "./commands/hyperliquid.js";
 import { manageInvitations } from "./commands/invitations.js";
 import { listenForNudgesFlow } from "./commands/nudges.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
@@ -105,6 +112,16 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "policy-chat", label: "Policy chat", run: () => policyChatFlow(salt, walletClient) },
       ],
     },
+    hyperliquid: {
+      title: "Hyperliquid",
+      entries: [
+        { value: "hl-getting-started", label: "Getting Started", run: () => hyperliquidGettingStartedFlow(salt, walletClient) },
+        { value: "hl-move-funds", label: "Move Funds", run: () => hyperliquidMoveFundsFlow(salt, walletClient) },
+        { value: "hl-trade", label: "Trade", run: () => hyperliquidTradeFlow(salt, walletClient) },
+        { value: "hl-portfolio", label: "Portfolio", run: () => hyperliquidPortfolioFlow(salt, walletClient) },
+        { value: "hl-positions", label: "Positions", run: () => hyperliquidPositionsFlow(salt, walletClient) },
+      ],
+    },
   };
 
   while (true) {
@@ -118,6 +135,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "accounts", label: "Accounts ▸" },
         { value: "assets", label: "Assets ▸" },
         { value: "policies", label: "Policies ▸" },
+        { value: "hyperliquid", label: "Hyperliquid ▸" },
         { value: EXIT, label: "Exit" },
       ],
     });
