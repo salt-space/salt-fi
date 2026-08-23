@@ -3,45 +3,81 @@ import { encode as msgpackEncode } from "@msgpack/msgpack";
 import type { SaltTypedData } from "salt-sdk";
 import { hexToBytes, hexToSignature, keccak256, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { network } from "./env.js";
 
 /**
- * Hyperliquid testnet only — this app is testnet-only throughout (see
- * CLAUDE.md). HyperEVM testnet's chain id (998) is a different chain from
- * both Salt's orchestration chain (Arbitrum Sepolia, 421614) and HyperEVM
- * *mainnet* (999) — don't conflate them the way the old CloudFormation
- * template conflated Salt's testnet/mainnet.
+ * Per-environment Hyperliquid config, selected from `SALT_ENV` (via `network.saltEnv`). HyperEVM
+ * testnet (998) and mainnet (999) are distinct chains with distinct HyperCore token identities,
+ * spot markets and API hosts — every value below differs by network, so don't conflate them.
+ * Testnet values were confirmed live during QA; mainnet token ids / evmContract / HYPE-USDC pair
+ * index were read from live mainnet `/info` `spotMeta`.
  */
-export const HYPERLIQUID_API_URL = "https://api.hyperliquid-testnet.xyz";
-export const HYPEREVM_CHAIN_ID = 998;
+interface HyperliquidEnv {
+  apiUrl: string;
+  chainId: number;
+  /** Value Hyperliquid's `hyperliquidChain` typed-data field expects. */
+  chainLabel: "Testnet" | "Mainnet";
+  /** L1-action phantom-agent `source`: "b" on testnet, "a" on mainnet. */
+  phantomAgentSource: "a" | "b";
+  /** USDC's HyperEVM ERC-20 — spotMeta token 0 `evmContract.address`. */
+  usdcHyperEvmAddress: Address;
+  usdcCoreTokenId: string;
+  hypeCoreTokenId: string;
+  /** HYPE/USDC spot pair index in spotMeta.universe. Spot order asset ids are `10000 + this`. */
+  hypeUsdcSpotPairIndex: number;
+}
+
+const HYPERLIQUID_ENV: Record<typeof network.saltEnv, HyperliquidEnv> = {
+  testnet: {
+    apiUrl: "https://api.hyperliquid-testnet.xyz",
+    chainId: 998,
+    chainLabel: "Testnet",
+    phantomAgentSource: "b",
+    usdcHyperEvmAddress: "0x0B80659a4076E9E93C7DbE0f10675A16a3e5C206",
+    usdcCoreTokenId: "0xeb62eee3685fc4c43992febcd9e75443",
+    hypeCoreTokenId: "0x7317beb7cceed72ef0b346074cc8e7ab",
+    hypeUsdcSpotPairIndex: 1035,
+  },
+  mainnet: {
+    apiUrl: "https://api.hyperliquid.xyz",
+    chainId: 999,
+    chainLabel: "Mainnet",
+    phantomAgentSource: "a",
+    usdcHyperEvmAddress: "0x6b9e773128f453f5c2c60935ee2de2cbc5390a24",
+    usdcCoreTokenId: "0x6d1e7cde53ba9467b783cb7c530ce054",
+    hypeCoreTokenId: "0x0d01dc56dcaaca66ad901c959b4011ec",
+    hypeUsdcSpotPairIndex: 107,
+  },
+};
+
+const hlEnv = HYPERLIQUID_ENV[network.saltEnv];
+
+export const HYPERLIQUID_API_URL = hlEnv.apiUrl;
+export const HYPEREVM_CHAIN_ID = hlEnv.chainId;
 /**
- * HyperEVM testnet RPC — used for both reads and the on-chain broadcast in Move
- * Funds. The public endpoint is rate-limited (100 req/min) and can be flaky, so
- * prefer a dedicated node: an Alchemy HyperEVM-testnet URL is derived
- * automatically from `ALCHEMY_API_KEY`, or set `HYPEREVM_RPC_URL` for a full
- * custom URL (which takes precedence).
+ * HyperEVM RPC — used for both reads and the on-chain broadcast in Move Funds. The public
+ * endpoint is rate-limited (100 req/min) and can be flaky, so prefer a dedicated node: an Alchemy
+ * HyperEVM URL for the active network is derived automatically from `ALCHEMY_API_KEY`, or set
+ * `HYPEREVM_RPC_URL` for a full custom URL (which takes precedence).
  */
 export const HYPEREVM_RPC_URL =
   process.env.HYPEREVM_RPC_URL ??
   (process.env.ALCHEMY_API_KEY
-    ? `https://hyperliquid-testnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
-    : "https://rpc.hyperliquid-testnet.xyz/evm");
-/** Value Hyperliquid's `hyperliquidChain` typed-data field expects for testnet actions. */
-export const HYPERLIQUID_CHAIN_LABEL = "Testnet";
+    ? `https://hyperliquid-${network.saltEnv}.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+    : network.saltEnv === "mainnet"
+      ? "https://rpc.hyperliquid.xyz/evm"
+      : "https://rpc.hyperliquid-testnet.xyz/evm");
+/** Value Hyperliquid's `hyperliquidChain` typed-data field expects for the active network. */
+export const HYPERLIQUID_CHAIN_LABEL = hlEnv.chainLabel;
 
-/**
- * USDC on HyperEVM testnet and its HyperCore spot token index. Confirmed live
- * against Hyperliquid testnet's own `/info` `spotMeta` response (token index
- * 0, `evmContract.address` below) — not a docs/search guess like the
- * previous placeholder here was.
- */
-export const USDC_HYPEREVM_ADDRESS: Address = "0x0B80659a4076E9E93C7DbE0f10675A16a3e5C206";
+export const USDC_HYPEREVM_ADDRESS: Address = hlEnv.usdcHyperEvmAddress;
 export const USDC_CORE_TOKEN_INDEX = 0;
-export const USDC_CORE_TOKEN_ID = "0xeb62eee3685fc4c43992febcd9e75443";
-export const HYPE_CORE_TOKEN_ID = "0x7317beb7cceed72ef0b346074cc8e7ab";
+export const USDC_CORE_TOKEN_ID = hlEnv.usdcCoreTokenId;
+export const HYPE_CORE_TOKEN_ID = hlEnv.hypeCoreTokenId;
 /** HyperEVM's fixed system address for native HYPE deposits/withdrawals (unlike ERC-20s, which key off {@link coreSystemAddress}). */
 export const HYPE_CORE_SYSTEM_ADDRESS: Address = "0x2222222222222222222222222222222222222222";
-/** HYPE/USDC's spot pair index (1035) in spotMeta.universe, confirmed live. Spot order asset ids are `10000 + this`. */
-export const HYPE_USDC_SPOT_PAIR_INDEX = 1035;
+/** HYPE/USDC's spot pair index in spotMeta.universe. Spot order asset ids are `10000 + this`. */
+export const HYPE_USDC_SPOT_PAIR_INDEX = hlEnv.hypeUsdcSpotPairIndex;
 
 /**
  * The HyperEVM deposit destination for a given HyperCore spot token: `0x20`
@@ -60,15 +96,15 @@ export function coreSystemAddress(tokenIndex: number): Address {
  * with the separate, compressed signing scheme L1 actions (orders/cancels)
  * use, which is fixed at chainId 1337 regardless of network.
  *
- * `chainId` here is HyperEVM's own chain id — empirically confirmed working
- * for ApproveAgent against live testnet (ceremony succeeded, agent verified
- * afterward). Worth flagging: Hyperliquid's own Python SDK instead hard-codes
- * `0x66eee` (421614, Arbitrum Sepolia) for this domain on *every* network,
- * mainnet included, which doesn't match either HyperEVM chain id. Since our
- * value is proven against the real backend, keep it — but if a new
- * `HyperliquidTransaction:*` action ever fails signature verification here
- * (as opposed to a business-logic rejection like insufficient funds), this
- * mismatch is the first thing to try swapping.
+ * `chainId` here is HyperEVM's own chain id ({@link HYPEREVM_CHAIN_ID}: 998 testnet, 999
+ * mainnet) — empirically confirmed working for ApproveAgent against live *testnet* (ceremony
+ * succeeded, agent verified afterward). ⚠️ The mainnet value (999) is NOT yet verified against
+ * the mainnet backend — if a `HyperliquidTransaction:*` action fails *signature verification* on
+ * mainnet (as opposed to a business-logic rejection like insufficient funds), this is the first
+ * thing to try swapping. Worth flagging: Hyperliquid's own Python SDK instead hard-codes
+ * `0x66eee` (421614, Arbitrum Sepolia) for this domain on *every* network, which doesn't match
+ * either HyperEVM chain id — so if 999 is rejected, 42161 (Arbitrum One) / 421614 are the
+ * candidates to try.
  */
 function hyperliquidSignDomain() {
   return {
@@ -223,8 +259,8 @@ export interface HyperliquidSignature {
 // against Hyperliquid's official Python SDK (hyperliquid-dex/hyperliquid-python-sdk,
 // utils/signing.py), not guessed, given this is executable signing logic.
 
-/** "b" on testnet, "a" on mainnet — this app is testnet-only, so this is fixed. */
-const L1_PHANTOM_AGENT_SOURCE = "b";
+/** L1-action phantom-agent `source`: "b" on testnet, "a" on mainnet (see {@link HYPERLIQUID_ENV}). */
+const L1_PHANTOM_AGENT_SOURCE = hlEnv.phantomAgentSource;
 
 function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   const total = arrays.reduce((sum, a) => sum + a.length, 0);
