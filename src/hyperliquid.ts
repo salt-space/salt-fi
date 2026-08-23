@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { encode as msgpackEncode } from "@msgpack/msgpack";
 import type { SaltTypedData } from "salt-sdk";
 import { hexToBytes, hexToSignature, keccak256, type Address, type Hex } from "viem";
@@ -12,7 +13,18 @@ import { privateKeyToAccount } from "viem/accounts";
  */
 export const HYPERLIQUID_API_URL = "https://api.hyperliquid-testnet.xyz";
 export const HYPEREVM_CHAIN_ID = 998;
-export const HYPEREVM_RPC_URL = "https://rpc.hyperliquid-testnet.xyz/evm";
+/**
+ * HyperEVM testnet RPC — used for both reads and the on-chain broadcast in Move
+ * Funds. The public endpoint is rate-limited (100 req/min) and can be flaky, so
+ * prefer a dedicated node: an Alchemy HyperEVM-testnet URL is derived
+ * automatically from `ALCHEMY_API_KEY`, or set `HYPEREVM_RPC_URL` for a full
+ * custom URL (which takes precedence).
+ */
+export const HYPEREVM_RPC_URL =
+  process.env.HYPEREVM_RPC_URL ??
+  (process.env.ALCHEMY_API_KEY
+    ? `https://hyperliquid-testnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+    : "https://rpc.hyperliquid-testnet.xyz/evm");
 /** Value Hyperliquid's `hyperliquidChain` typed-data field expects for testnet actions. */
 export const HYPERLIQUID_CHAIN_LABEL = "Testnet";
 

@@ -76,6 +76,26 @@ async function pickHyperliquidAccount(
   message: string,
 ): Promise<{ accountId: string; account: SaltAccount } | undefined> {
   const selfAddress = walletClient.account.address;
+
+  // Escape hatch for busy orgs (e.g. the perf bench, ~600+ accounts): set
+  // HL_ACCOUNT_ID to an account id or evm address to target it directly and
+  // skip the org + account pickers. Falls back to the pickers if it doesn't
+  // resolve to an eligible account you sign on.
+  const pin = process.env.HL_ACCOUNT_ID?.toLowerCase();
+  if (pin) {
+    for (const org of await salt.getOrganisations()) {
+      const accs = await salt.getAccounts(org.id).catch(() => [] as SaltAccount[]);
+      const hit = accs.find(
+        (a) => a.id.toLowerCase() === pin || (a.evmAddress ?? "").toLowerCase() === pin,
+      );
+      if (hit?.evmAddress && hit.signers.some((s) => s.toLowerCase() === selfAddress.toLowerCase())) {
+        p.log.info(`Using account "${hit.name}" (${hit.evmAddress}) via HL_ACCOUNT_ID.`);
+        return { accountId: hit.id, account: hit };
+      }
+    }
+    p.log.warn(`HL_ACCOUNT_ID "${process.env.HL_ACCOUNT_ID}" didn't match an account you sign on — falling back to the pickers.`);
+  }
+
   const organisationId = await pickOrganisation(salt, "Which organisation?");
   if (!organisationId) return undefined;
 
@@ -201,16 +221,6 @@ async function chooseOrderSigningMethod(accountId: string): Promise<SigningChoic
 
   const signer = await resolveAgentKeySigner(accountId, agentMeta!.agentAddress);
   return signer ? { kind: "agent", signer } : undefined;
-}
-
-/**
- * Trade's own signer resolution — deliberately narrower than {@link chooseOrderSigningMethod}:
- * no MPC-ceremony option. Normal trading always goes through the account's approved agent; the
- * active-agent guard in placeOrderFlow means this is only ever called once a verified agent is
- * already confirmed to exist, so this just resolves (or prompts for) that agent's key.
- */
-async function requireAgentSigner(accountId: string, agentAddress: Address): Promise<L1ActionSigner | undefined> {
-  return resolveAgentKeySigner(accountId, agentAddress);
 }
 
 // --- Formatting helpers --------------------------------------------------------
@@ -593,11 +603,15 @@ async function fundTradingFlow(salt: Salt, walletClient: SaltWalletClient): Prom
     return;
   }
 
+  // Hyperliquid's usdClassTransfer rejects an amount its own coarser USD
+  // accounting reads as exceeding the balance, so floor to 6 decimals — always
+  // <= usdcAvailable, which clears the "Insufficient balance" full-balance edge.
+  const moveAmount = Math.floor(usdcAvailable * 1e6) / 1e6;
   const s4 = p.spinner();
   s4.start("Starting Spot -> Perps signing ceremony");
   try {
-    await transferUsdClass(salt, walletClient, accountId, String(usdcAvailable), true, (joined, total) => s4.message(`Waiting for signers: ${joined}/${total} joined`));
-    s4.stop(`Moved ${fmtNum(usdcAvailable)} USDC to Perps`);
+    await transferUsdClass(salt, walletClient, accountId, String(moveAmount), true, (joined, total) => s4.message(`Waiting for signers: ${joined}/${total} joined`));
+    s4.stop(`Moved ${fmtNum(moveAmount)} USDC to Perps`);
   } catch (err) {
     s4.stop("Spot -> Perps transfer failed");
     reportError(err);
@@ -887,17 +901,86 @@ async function rawWithdrawFlow(salt: Salt, walletClient: SaltWalletClient): Prom
   }
 }
 
+/** HyperCore Spot <-> Perps: move USDC between the spot wallet and perp margin directly (the
+ *  UsdClassTransfer hop, exposed on its own for when it needs running outside the Fund Trading
+ *  routing — e.g. USDC already sitting on Spot). */
+async function rawUsdClassFlow(salt: Salt, walletClient: SaltWalletClient, toPerp: boolean): Promise<void> {
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Move margin for which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const accountAddress = account.evmAddress as Address;
+
+  const s = p.spinner();
+  s.start("Checking available USDC");
+  let available: number;
+  try {
+    if (toPerp) {
+      const spot = await fetchSpotClearinghouseState(accountAddress);
+      const usdc = spot.balances.find((b) => b.coin === "USDC");
+      available = usdc ? Number(usdc.total) - Number(usdc.hold) : 0;
+      s.stop(`${fmtNum(available)} USDC available in Spot`);
+    } else {
+      const perp = await fetchClearinghouseState(accountAddress);
+      available = Number(perp.withdrawable);
+      s.stop(`${fmtNum(available)} USDC withdrawable from Perps`);
+    }
+  } catch (err) {
+    s.stop("Couldn't check balance");
+    reportError(err);
+    return;
+  }
+  if (available <= 0) {
+    p.log.warn(`No USDC available to move ${toPerp ? "to Perps" : "to Spot"}.`);
+    return;
+  }
+
+  // Floor to 6 decimals so the request never exceeds Hyperliquid's coarser USD balance accounting.
+  const maxMovable = Math.floor(available * 1e6) / 1e6;
+  const amountInput = await p.text({
+    message: `Amount of USDC to move ${toPerp ? "Spot -> Perps" : "Perps -> Spot"} (max ${fmtNum(maxMovable)})`,
+    placeholder: String(maxMovable),
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      const parsed = Number.parseFloat(v);
+      if (!Number.isFinite(parsed) || parsed <= 0) return "Enter a positive number";
+      if (parsed > available) return `Exceeds available (${fmtNum(available)} USDC)`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+  const amount = Math.floor(Number.parseFloat(amountInput) * 1e6) / 1e6;
+
+  const confirmed = await p.confirm({
+    message: `Move ${fmtNum(amount)} USDC ${toPerp ? "Spot -> Perps" : "Perps -> Spot"} for "${account.name}"? This runs an MPC signing ceremony.`,
+  });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  const s2 = p.spinner();
+  s2.start("Starting signing ceremony");
+  try {
+    await transferUsdClass(salt, walletClient, accountId, String(amount), toPerp, (joined, total) => s2.message(`Waiting for signers: ${joined}/${total} joined`));
+    s2.stop(`Moved ${fmtNum(amount)} USDC ${toPerp ? "to Perps" : "to Spot"}`);
+  } catch (err) {
+    s2.stop("Transfer failed");
+    reportError(err);
+  }
+}
+
 async function advancedMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const choice = await select({
     message: "Advanced: raw transfer",
     options: [
       { value: "deposit", label: "Transfer HyperEVM -> HyperCore", hint: "lands in Spot, not margin" },
       { value: "withdraw", label: "Transfer HyperCore -> HyperEVM", hint: "from Spot" },
+      { value: "toPerp", label: "Move USDC Spot -> Perps", hint: "into trading margin" },
+      { value: "toSpot", label: "Move USDC Perps -> Spot", hint: "out of trading margin" },
     ],
   });
   if (p.isCancel(choice)) return;
   if (choice === "deposit") await rawDepositFlow(salt, walletClient);
-  else await rawWithdrawFlow(salt, walletClient);
+  else if (choice === "withdraw") await rawWithdrawFlow(salt, walletClient);
+  else if (choice === "toPerp") await rawUsdClassFlow(salt, walletClient, true);
+  else await rawUsdClassFlow(salt, walletClient, false);
 }
 
 export async function hyperliquidMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
@@ -1263,14 +1346,20 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
   if (p.isCancel(confirmed) || !confirmed) return;
 
   // --- Execute --------------------------------------------------------------------
-  const signer = await requireAgentSigner(accountId, agentMeta.agentAddress);
-  if (!signer) {
-    p.log.warn("No usable agent key — order not sent.");
+  // Offer the same choice the other order paths do: the approved agent's key (fast, no ceremony)
+  // or a Salt MPC ceremony (no local key). Prompts run before the spinner starts.
+  const signingChoice = await chooseOrderSigningMethod(accountId);
+  if (!signingChoice) {
+    p.log.warn("No signing method chosen — order not sent.");
     return;
   }
 
   const s4 = p.spinner();
-  s4.start("Setting leverage");
+  s4.start(signingChoice.kind === "mpc" ? "Starting signing ceremony" : "Setting leverage");
+  const signer =
+    signingChoice.kind === "agent"
+      ? signingChoice.signer
+      : mpcCeremonySigner(salt, walletClient, accountId, (joined, total) => s4.message(`Waiting for signers: ${joined}/${total} joined`));
   try {
     const leverageAction = buildUpdateLeverageAction({ assetIndex, leverage, isCross: false });
     await signAndSubmitL1Action(signer, leverageAction);
@@ -1355,15 +1444,150 @@ async function cancelOrderFlow(salt: Salt, walletClient: SaltWalletClient): Prom
   }
 }
 
+/**
+ * Closes an open perp position with a reduce-only aggressive-IOC market order sized to the exact
+ * position (`reduceOnly` so it flattens rather than risking a flip to the other side). Signs via
+ * the agent key or a Salt MPC ceremony, same as order placement — and since it doesn't need a
+ * verified agent (MPC always works), it's the counterpart the Trade menu was missing.
+ */
+async function closePositionFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Close a position for which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const userAddress = account.evmAddress as Address;
+
+  const s = p.spinner();
+  s.start("Loading positions");
+  let perp: Awaited<ReturnType<typeof fetchClearinghouseState>>;
+  let meta: PerpMeta;
+  try {
+    [perp, meta] = await Promise.all([fetchClearinghouseState(userAddress), fetchMeta()]);
+    s.stop("Positions loaded");
+  } catch (err) {
+    s.stop("Failed to load positions");
+    reportError(err);
+    return;
+  }
+
+  const open = perp.assetPositions.filter((ap) => Number(ap.position.szi) !== 0);
+  if (open.length === 0) {
+    p.log.info("No open positions to close.");
+    return;
+  }
+
+  const coin = await select({
+    message: "Close which position?",
+    options: open.map((ap) => {
+      const pos = ap.position;
+      const side = Number(pos.szi) >= 0 ? "Long" : "Short";
+      return {
+        value: pos.coin,
+        label: `${pos.coin} ${side} ${fmtNum(Math.abs(Number(pos.szi)))}`,
+        hint: `entry ${fmtNum(pos.entryPx)} · uPnL ${fmtSignedUsd(Number(pos.unrealizedPnl))}`,
+      };
+    }),
+  });
+  if (p.isCancel(coin)) return;
+
+  const chosen = open.find((ap) => ap.position.coin === coin)!.position;
+  const assetIndex = meta.universe.findIndex((a) => a.name === coin);
+  if (assetIndex < 0) {
+    p.log.error(`Couldn't resolve ${coin} in the perp universe.`);
+    return;
+  }
+  const szDecimals = meta.universe[assetIndex].szDecimals;
+  const fullSize = Math.abs(Number(chosen.szi));
+  const closeIsBuy = Number(chosen.szi) < 0; // long -> sell to close, short -> buy to close
+
+  // Partial close: default to the whole position, accept any size up to it.
+  const sizeInput = await p.text({
+    message: `Size to close (max ${fmtNum(fullSize, szDecimals)} ${coin})`,
+    placeholder: String(fullSize),
+    initialValue: String(fullSize),
+    validate: (v) => {
+      if (!v) return "Size is required";
+      const parsed = Number.parseFloat(v);
+      if (!Number.isFinite(parsed) || parsed <= 0) return "Enter a positive size";
+      if (parsed > fullSize) return `Exceeds position size (${fmtNum(fullSize, szDecimals)} ${coin})`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(sizeInput)) return;
+  // Round to the market's size precision; cap at the position so rounding can't overshoot it.
+  const size = Math.min(fullSize, Number(Number.parseFloat(sizeInput).toFixed(szDecimals)));
+  if (size <= 0) {
+    p.log.error("That size rounds to zero at this market's precision.");
+    return;
+  }
+
+  const s2 = p.spinner();
+  s2.start(`Fetching ${coin} price`);
+  let mark: number;
+  try {
+    const mids = await fetchAllMids();
+    const midStr = mids[coin];
+    if (!midStr) throw new Error(`No live price for ${coin}`);
+    mark = Number(midStr);
+    s2.stop(`Mark price: ${fmtNum(mark)}`);
+  } catch (err) {
+    s2.stop("Failed to fetch price");
+    reportError(err);
+    return;
+  }
+
+  const side = Number(chosen.szi) >= 0 ? "Long" : "Short";
+  const isPartial = size < fullSize;
+  p.note(
+    [
+      `Close ${side} ${fmtNum(size)} ${coin}${isPartial ? ` (partial — ${fmtNum(fullSize - size)} left open)` : " (full)"}`,
+      `Order:            reduce-only market (aggressive IOC)`,
+      `Mark:             ${fmtNum(mark)}`,
+      `Unrealized PnL:   ${fmtSignedUsd(Number(chosen.unrealizedPnl))} (on the full position)`,
+    ].join("\n"),
+    "Close preview",
+  );
+  const confirmed = await p.confirm({ message: "Close this position?" });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  const signingChoice = await chooseOrderSigningMethod(accountId);
+  if (!signingChoice) {
+    p.log.warn("No signing method chosen — position not closed.");
+    return;
+  }
+
+  const s3 = p.spinner();
+  s3.start(signingChoice.kind === "mpc" ? "Starting signing ceremony" : "Closing position");
+  const signer =
+    signingChoice.kind === "agent"
+      ? signingChoice.signer
+      : mpcCeremonySigner(salt, walletClient, accountId, (joined, total) => s3.message(`Waiting for signers: ${joined}/${total} joined`));
+  try {
+    const limitPx = marketOrderLimitPrice(mark, closeIsBuy, szDecimals);
+    const action = buildLimitOrderAction({ assetIndex, isBuy: closeIsBuy, limitPx, size, reduceOnly: true, tif: "Ioc" });
+    const response = await signAndSubmitL1Action(signer, action);
+    const errors = extractActionErrors(response);
+    if (errors.length > 0) {
+      s3.stop(`Close rejected — ${errors.join("; ")}`);
+      return;
+    }
+    s3.stop(describeOrderStatus(response));
+  } catch (err) {
+    s3.stop("Close failed");
+    reportError(err);
+  }
+}
+
 export async function hyperliquidTradeFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const choice = await select({
     message: "Trade",
     options: [
       { value: "place", label: "Place order", hint: "limit or market, perp only" },
+      { value: "close", label: "Close position", hint: "reduce-only market, exact size" },
       { value: "cancel", label: "Cancel order" },
     ],
   });
   if (p.isCancel(choice)) return;
   if (choice === "place") await placeOrderFlow(salt, walletClient);
+  else if (choice === "close") await closePositionFlow(salt, walletClient);
   else await cancelOrderFlow(salt, walletClient);
 }
