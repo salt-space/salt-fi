@@ -100,9 +100,16 @@ export async function accountBalancesFlow(salt: Salt): Promise<void> {
 
   const s = p.spinner();
   s.start("Fetching balances");
+  // Chains whose RPC read failed contribute no tokens; collect them so we can
+  // warn instead of silently omitting them (an unreadable chain looks identical
+  // to an empty one otherwise).
+  const failedChains: string[] = [];
   let tokens: TokenBalance[];
   try {
-    tokens = await fetchAccountTokens(account.evmAddress, { networks: SEND_NETWORK_IDS });
+    tokens = await fetchAccountTokens(account.evmAddress, {
+      networks: SEND_NETWORK_IDS,
+      onChainError: (chainId) => failedChains.push(chainId),
+    });
     s.stop("Balances fetched");
   } catch (err) {
     s.stop("Failed to fetch balances");
@@ -110,9 +117,24 @@ export async function accountBalancesFlow(salt: Salt): Promise<void> {
     return;
   }
 
+  if (failedChains.length > 0) {
+    const names = failedChains.map((id) => CHAIN_NAME_BY_ID[id] ?? id).join(", ");
+    p.log.warn(
+      `Couldn't read ${names} (RPC error or timeout) — any balance there is NOT shown below.\n` +
+        `Point that chain at a reliable RPC with SALT_RPC_<chainId>, or raise SALT_BALANCE_TIMEOUT_MS.`,
+    );
+  }
+
   const held = tokens.filter((token) => Number(token.balance) > 0);
   if (held.length === 0) {
-    p.log.info(`${account?.name} holds no balances across ${Object.values(CHAIN_NAME_BY_ID).join(", ")}.`);
+    const readable = SEND_NETWORK_IDS.filter((id) => !failedChains.includes(id)).map(
+      (id) => CHAIN_NAME_BY_ID[id] ?? id,
+    );
+    p.log.info(
+      readable.length > 0
+        ? `${account?.name} holds no balances across ${readable.join(", ")}.`
+        : `Couldn't read any chain for ${account?.name} — no balances to show.`,
+    );
     return;
   }
 
