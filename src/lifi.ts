@@ -162,3 +162,47 @@ export async function getStatus(params: {
   if (!res.ok) throw await lifiError(res, "LI.FI status check failed");
   return (await res.json()) as LifiStatus;
 }
+
+const priceKey = (chainId: string, address: string) => `${chainId}:${address.toLowerCase()}`;
+
+/**
+ * Current USD price of a token from LI.FI's `/v1/token`, or `null` if
+ * unavailable. Works uniformly for native ({@link LIFI_NATIVE_TOKEN}) and ERC-20
+ * addresses, keyless. Never throws — pricing is best-effort decoration.
+ */
+export async function getTokenPriceUsd(chainId: number, tokenAddress: string): Promise<number | null> {
+  const q = new URLSearchParams({ chain: String(chainId), token: tokenAddress });
+  try {
+    const res = await fetch(`${LIFI_API}/token?${q.toString()}`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { priceUSD?: string };
+    const price = Number(body?.priceUSD);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch USD prices for a set of (chain, token) pairs concurrently, returning a
+ * map keyed by `"<chainId>:<lowercased address>"`. Deduplicates inputs; omits
+ * any token LI.FI couldn't price. Best-effort — a failed lookup is simply absent.
+ */
+export async function fetchTokenPricesUsd(
+  items: { chainId: string; address: string }[],
+): Promise<Map<string, number>> {
+  const unique = [...new Map(items.map((i) => [priceKey(i.chainId, i.address), i])).values()];
+  const out = new Map<string, number>();
+  await Promise.all(
+    unique.map(async (i) => {
+      const price = await getTokenPriceUsd(Number(i.chainId), i.address);
+      if (price != null) out.set(priceKey(i.chainId, i.address), price);
+    }),
+  );
+  return out;
+}
+
+/** Key for a {@link fetchTokenPricesUsd} result: `"<chainId>:<lowercased address>"`. */
+export function tokenPriceKey(chainId: string, address: string): string {
+  return priceKey(chainId, address);
+}
