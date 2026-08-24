@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { CHAIN_NAME_BY_ID, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
+import { fetchTokenPricesUsd, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
 import { fetchAccountTokens, type TokenBalance } from "../token-balances.js";
 
@@ -60,7 +61,7 @@ function renderBalances(tokens: TokenBalance[]): { body: string; total: number; 
       }
       const symbol = token.symbol.padEnd(symbolWidth);
       const amount = formatAmount(token.balance).padStart(amountWidth);
-      lines.push(`  ${symbol}  ${amount}${value !== null ? `  ${formatUsd(value)}` : ""}`);
+      lines.push(`  ${symbol}  ${amount}${value !== null ? `  (${formatUsd(value)})` : ""}`);
     }
   }
 
@@ -138,7 +139,15 @@ export async function accountBalancesFlow(salt: Salt): Promise<void> {
     return;
   }
 
-  const { body, total, anyPriced } = renderBalances(held);
+  // Enrich with live USD prices (LI.FI /v1/token — keyless, native + ERC-20) so
+  // each balance shows its fiat value; unpriced tokens simply omit it.
+  const priceSpinner = p.spinner();
+  priceSpinner.start("Pricing balances");
+  const prices = await fetchTokenPricesUsd(held.map((t) => ({ chainId: t.chainId, address: t.address })));
+  priceSpinner.stop(prices.size > 0 ? "Balances priced" : "Live prices unavailable — showing amounts only");
+  const priced = held.map((t) => ({ ...t, price: prices.get(tokenPriceKey(t.chainId, t.address)) ?? 0 }));
+
+  const { body, total, anyPriced } = renderBalances(priced);
   const totalText = total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const footer = anyPriced ? `\n\nTotal ≈ $${totalText}` : "";
   p.note(`${body}${footer}`, `${account?.name}  •  ${account?.evmAddress}`);

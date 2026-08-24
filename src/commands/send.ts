@@ -4,8 +4,9 @@ import { buildTransferTransaction, TransferType } from "salt-sdk";
 import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
+import { fetchTokenPricesUsd, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
-import { fetchAccountTokens } from "../token-balances.js";
+import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
@@ -84,12 +85,14 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
   // an asset the account actually holds there (looks identical to "no balance").
   const failedChains: string[] = [];
   let tokens;
+  let prices = new Map<string, number>();
   try {
     tokens = await fetchAccountTokens(account.evmAddress as string, {
       raw: true,
       networks: SEND_NETWORK_IDS,
       onChainError: (chainId) => failedChains.push(chainId),
     });
+    prices = await fetchTokenPricesUsd(tokens.map((t) => ({ chainId: t.chainId, address: t.address })));
     s.stop(`Found ${tokens.length} token balance(s)`);
   } catch (err) {
     s.stop("Failed to fetch balances");
@@ -121,7 +124,7 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     options: sendable.map((token, index) => ({
       value: index,
       label: `${token.symbol} on ${CHAIN_NAME_BY_ID[token.chainId] ?? token.chainId}`,
-      hint: formatUnits(token.balance, token.decimals),
+      hint: formatBalanceHint(token.balance, token.decimals, prices.get(tokenPriceKey(token.chainId, token.address))),
     })),
   });
   if (p.isCancel(tokenIndex)) return;

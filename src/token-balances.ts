@@ -20,6 +20,19 @@ export interface TokenBalance {
 }
 export type RawTokenBalance = Omit<TokenBalance, "balance"> & { balance: bigint };
 
+/**
+ * Format a raw balance as a human-readable amount, with its USD value in
+ * brackets when a positive price is known — e.g. `0.005  (~$12.39)`. Used for
+ * the asset-picker hints in the Send / Swap / Bridge flows. Falls back to just
+ * the amount when unpriced.
+ */
+export function formatBalanceHint(balance: bigint, decimals: number, priceUsd?: number): string {
+  const amount = formatUnits(balance, decimals);
+  if (!priceUsd || priceUsd <= 0) return amount;
+  const value = priceUsd * Number(amount);
+  return `${amount}  (~$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+}
+
 export interface FetchTokensOptions {
   /** Chain IDs to read balances on (e.g. SEND_NETWORK_IDS). */
   networks: string[];

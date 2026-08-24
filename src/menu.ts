@@ -3,6 +3,7 @@ import type { Salt } from "salt-sdk";
 import { createAccountFlow, listAccounts, verifyAccountBackupFlow } from "./commands/accounts.js";
 import { signMessageFlow } from "./commands/sign.js";
 import { accountBalancesFlow } from "./commands/balances.js";
+import { bridgeFlow } from "./commands/bridge.js";
 import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
@@ -103,6 +104,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
           : [{ value: "faucet", label: "Faucet for Salt accounts", run: () => faucetFlow(salt) }]),
         { value: "send", label: "Send assets", run: () => sendTransactionFlow(salt, walletClient) },
         { value: "swap", label: "Swap assets", run: () => swapFlow(salt, walletClient) },
+        { value: "bridge", label: "Bridge assets", hint: "move funds across chains (via LI.FI)", run: () => bridgeFlow(salt, walletClient) },
       ],
     },
     policies: {
