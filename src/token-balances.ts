@@ -25,6 +25,13 @@ export interface FetchTokensOptions {
   networks: string[];
   /** When true, `balance` is a raw bigint; otherwise a decimal-adjusted string. */
   raw?: boolean;
+  /**
+   * Called once per chain whose balance read fails (unreachable/slow/rate-limited
+   * RPC). Such a chain contributes no tokens, so without this the caller can't
+   * tell "no funds here" from "couldn't read here". Lets a UI surface a warning
+   * rather than silently dropping the chain.
+   */
+  onChainError?: (chainId: string, err: unknown) => void;
 }
 
 /**
@@ -51,7 +58,7 @@ export function fetchAccountTokens(
 ): Promise<TokenBalance[]>;
 export async function fetchAccountTokens(
   address: string,
-  { networks, raw = false }: FetchTokensOptions,
+  { networks, raw = false, onChainError }: FetchTokensOptions,
 ): Promise<(TokenBalance | RawTokenBalance)[]> {
   const account = address as Address;
   const out: (TokenBalance | RawTokenBalance)[] = [];
@@ -97,8 +104,11 @@ export async function fetchAccountTokens(
           }
         });
         for (const r of await Promise.all(reads)) if (r) chainOut.push(r);
-      } catch {
-        /* skip a chain whose RPC is unreachable or times out */
+      } catch (err) {
+        // The chain's RPC is unreachable or timed out: it contributes no tokens.
+        // Report it so the caller can distinguish this from a genuinely empty
+        // chain, rather than silently dropping it.
+        onChainError?.(chainId, err);
       }
       return chainOut;
     }),

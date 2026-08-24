@@ -80,14 +80,29 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
 
   const s = p.spinner();
   s.start("Fetching balances");
+  // Track chains whose RPC read failed so we can warn rather than silently hide
+  // an asset the account actually holds there (looks identical to "no balance").
+  const failedChains: string[] = [];
   let tokens;
   try {
-    tokens = await fetchAccountTokens(account.evmAddress as string, { raw: true, networks: SEND_NETWORK_IDS });
+    tokens = await fetchAccountTokens(account.evmAddress as string, {
+      raw: true,
+      networks: SEND_NETWORK_IDS,
+      onChainError: (chainId) => failedChains.push(chainId),
+    });
     s.stop(`Found ${tokens.length} token balance(s)`);
   } catch (err) {
     s.stop("Failed to fetch balances");
     reportError(err);
     return;
+  }
+
+  if (failedChains.length > 0) {
+    const names = failedChains.map((id) => CHAIN_NAME_BY_ID[id] ?? id).join(", ");
+    p.log.warn(
+      `Couldn't read ${names} (RPC error or timeout) — assets there won't be listed.\n` +
+        `Point that chain at a reliable RPC with SALT_RPC_<chainId>, or raise SALT_BALANCE_TIMEOUT_MS.`,
+    );
   }
 
   const sendable = tokens.filter(
