@@ -1,8 +1,9 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { type Address, createPublicClient, formatUnits, http, parseUnits } from "viem";
-import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl } from "../chains.js";
+import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
+import { getQuote, type LifiQuote, LIFI_NATIVE_TOKEN } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
 import { fetchAccountTokens } from "../token-balances.js";
 import {
@@ -24,7 +25,8 @@ export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Prom
   const choice = await select({
     message: "Which kind of swap?",
     options: [
-      { value: "fast", label: "Fast swap (Uniswap v3)", hint: "immediate on-chain swap via the account" },
+      { value: "aggregated", label: "Aggregated swap (LI.FI)", hint: "best route across DEXes; swaps native ETH too" },
+      { value: "fast", label: "Fast swap (Uniswap v3)", hint: "direct Uniswap v3; ERC-20 → ERC-20 only" },
       { value: "slow", label: "Slow swap (Turbine)", hint: "coming soon" },
     ],
   });
@@ -35,7 +37,266 @@ export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Prom
     return;
   }
 
+  if (choice === "aggregated") {
+    await aggregatedSwapFlow(salt, walletClient);
+    return;
+  }
+
   await fastSwapFlow(salt, walletClient);
+}
+
+/**
+ * Same-chain swap routed through LI.FI's DEX aggregator (a quote where
+ * `fromChain === toChain`). Unlike {@link fastSwapFlow} it aggregates across
+ * DEXes for a better price AND supports swapping the native asset directly (no
+ * wrap-to-WETH step). The signed `to`/`data`/`value` come verbatim from the
+ * quote — we never build swap calldata ourselves.
+ */
+async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  const selfAddress = walletClient.account.address;
+
+  const organisationId = await pickOrganisation(salt, "Swap from which organisation?");
+  if (!organisationId) return;
+
+  let accounts;
+  let organisation;
+  try {
+    [accounts, { organisation }] = await Promise.all([
+      salt.getAccounts(organisationId),
+      salt.getOrganisationById(organisationId),
+    ]);
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+
+  const isOwner =
+    organisation.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase())?.accessLevel === 1;
+
+  const eligibleAccounts = accounts.filter(
+    (account) =>
+      Boolean(account.evmAddress) &&
+      account.signers.some((signer) => signer.toLowerCase() === selfAddress.toLowerCase()),
+  );
+  if (eligibleAccounts.length === 0) {
+    p.log.info("No accounts here are both fully set up and ones you're a signer on.");
+    return;
+  }
+
+  const accountId = await select({
+    message: "Swap from which account?",
+    options: eligibleAccounts.map((account) => ({ value: account.id, label: account.name, hint: account.evmAddress })),
+  });
+  if (p.isCancel(accountId)) return;
+  const account = eligibleAccounts.find((a) => a.id === accountId)!;
+  const accountAddress = account.evmAddress as Address;
+
+  const chainId = await select({
+    message: "On which chain?",
+    options: SEND_NETWORK_IDS.map((id) => ({ value: id, label: CHAIN_NAME_BY_ID[id] ?? id })),
+  });
+  if (p.isCancel(chainId)) return;
+  const chainName = CHAIN_NAME_BY_ID[chainId] ?? chainId;
+  const chain = CHAIN_BY_ID[chainId];
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl(chainId)) });
+
+  // --- sell asset (native IS supported here, unlike fast swap) ---
+  const s = p.spinner();
+  s.start(`Fetching balances on ${chainName}`);
+  let tokens;
+  try {
+    tokens = await fetchAccountTokens(accountAddress, { raw: true, networks: [chainId] });
+    s.stop(`Found ${tokens.length} balance(s) on ${chainName}`);
+  } catch (err) {
+    s.stop("Failed to fetch balances");
+    reportError(err);
+    return;
+  }
+
+  const sellable = tokens.filter(
+    (t) => t.balance > 0n && (t.address.toLowerCase() === NATIVE_ADDRESS || MAINSTREAM_SYMBOLS.has(t.symbol.toUpperCase())),
+  );
+  if (sellable.length === 0) {
+    p.log.info(`No swappable balances on ${chainName} (native ${chain.nativeCurrency.symbol} or a mainstream token).`);
+    return;
+  }
+
+  const sellIndex = await select({
+    message: "Swap which asset?",
+    options: sellable.map((t, index) => ({ value: index, label: t.symbol, hint: formatUnits(t.balance, t.decimals) })),
+  });
+  if (p.isCancel(sellIndex)) return;
+  const sellToken = sellable[sellIndex];
+  const sellIsNative = sellToken.address.toLowerCase() === NATIVE_ADDRESS;
+  const sellParam = sellIsNative ? LIFI_NATIVE_TOKEN : (sellToken.address as Address);
+  const maxSell = formatUnits(sellToken.balance, sellToken.decimals);
+
+  // --- buy token (curated list, native, or manual) ---
+  const MANUAL = "__manual";
+  const NATIVE = "__native";
+  const known = (KNOWN_TOKENS_BY_CHAIN[chainId] ?? []).filter(
+    (t) => t.address.toLowerCase() !== sellToken.address.toLowerCase(),
+  );
+  const buyChoice = await select({
+    message: "Swap into which asset?",
+    options: [
+      ...known.map((t) => ({ value: t.address as string, label: t.symbol, hint: t.address })),
+      ...(sellIsNative ? [] : [{ value: NATIVE, label: `${chain.nativeCurrency.symbol} (native)`, hint: "native currency" }]),
+      { value: MANUAL, label: "Other token (enter address)" },
+    ],
+  });
+  if (p.isCancel(buyChoice)) return;
+
+  let buyParam: string;
+  let buyLabel: string;
+  if (buyChoice === NATIVE) {
+    buyParam = LIFI_NATIVE_TOKEN;
+    buyLabel = chain.nativeCurrency.symbol;
+  } else if (buyChoice === MANUAL) {
+    const manual = await p.text({
+      message: "Token address to buy",
+      validate: (v) => (!v || !ADDRESS_PATTERN.test(v) ? "Enter a valid 0x-prefixed address" : undefined),
+    });
+    if (p.isCancel(manual)) return;
+    buyParam = manual;
+    buyLabel = `${manual.slice(0, 6)}…${manual.slice(-4)}`;
+  } else {
+    buyParam = buyChoice;
+    buyLabel = known.find((t) => t.address === buyChoice)?.symbol ?? buyChoice;
+  }
+  if (buyParam.toLowerCase() === sellParam.toLowerCase()) {
+    p.log.error("Buy and sell tokens must be different.");
+    return;
+  }
+
+  // --- amount + slippage ---
+  const amountInput = await p.text({
+    message: `Amount of ${sellToken.symbol} to swap (available: ${maxSell})`,
+    placeholder: maxSell,
+    validate: (value) => {
+      if (!value) return "Amount is required";
+      let parsed: bigint;
+      try {
+        parsed = parseUnits(value, sellToken.decimals);
+      } catch {
+        return "Not a valid amount";
+      }
+      if (parsed <= 0n) return "Amount must be greater than 0";
+      if (parsed > sellToken.balance) return `Exceeds available balance (${maxSell} ${sellToken.symbol})`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+  const fromAmount = parseUnits(amountInput, sellToken.decimals);
+  if (sellIsNative && fromAmount === sellToken.balance) {
+    p.log.warn(`Swapping your entire ${sellToken.symbol} balance — leave a little behind for gas or the tx will fail.`);
+  }
+
+  const slippageInput = await p.text({
+    message: "Max slippage % (0.5 suggested)",
+    defaultValue: "0.5",
+    placeholder: "0.5",
+    validate: (v) => {
+      if (v && Number.isNaN(Number(v))) return "Enter a number, e.g. 0.5";
+      if (v && (Number(v) < 0 || Number(v) >= 100)) return "Must be between 0 and 100";
+      return undefined;
+    },
+  });
+  if (p.isCancel(slippageInput)) return;
+  const slippage = Number(slippageInput || "0.5") / 100;
+
+  // --- quote (same-chain: fromChain === toChain) ---
+  const quoteSpinner = p.spinner();
+  quoteSpinner.start("Finding the best route");
+  let quote: LifiQuote;
+  try {
+    quote = await getQuote({
+      fromChain: Number(chainId),
+      toChain: Number(chainId),
+      fromToken: sellParam,
+      toToken: buyParam,
+      fromAmount,
+      fromAddress: accountAddress,
+      toAddress: accountAddress,
+      slippage,
+    });
+    quoteSpinner.stop(`Route found via ${quote.toolDetails?.name ?? quote.tool}`);
+  } catch (err) {
+    quoteSpinner.stop("No route available");
+    p.log.error((err as Error).message);
+    return;
+  }
+
+  const toDecimals = quote.action.toToken.decimals;
+  const toAmount = formatUnits(BigInt(quote.estimate.toAmount), toDecimals);
+  const toAmountMin = formatUnits(BigInt(quote.estimate.toAmountMin), toDecimals);
+  const totalFeesUsd = (quote.estimate.feeCosts ?? []).reduce((sum, f) => sum + (Number(f.amountUSD) || 0), 0);
+  p.note(
+    `Swap ${amountInput} ${sellToken.symbol} → ~${toAmount} ${buyLabel} on ${chainName}\n` +
+      `  route: ${quote.toolDetails?.name ?? quote.tool}\n` +
+      `  min received (after ${slippageInput || "0.5"}% slippage): ${toAmountMin} ${buyLabel}` +
+      (totalFeesUsd > 0 ? `\n  fees: ~$${totalFeesUsd.toFixed(2)}` : ""),
+    "Aggregated swap (LI.FI)",
+  );
+
+  // --- policy pre-check on the exact transactions we'll submit ---
+  const swapTo = quote.transactionRequest.to;
+  const swapData = quote.transactionRequest.data;
+  const swapValue = BigInt(quote.transactionRequest.value ?? "0x0");
+
+  // ERC-20 sources need an allowance to LI.FI's approvalAddress first; native doesn't.
+  let approveData: `0x${string}` | undefined;
+  if (!sellIsNative) {
+    const approvalAddress = quote.estimate.approvalAddress as Address;
+    try {
+      const allowance = await publicClient.readContract({
+        address: sellToken.address as Address,
+        abi: ERC20_ABI,
+        functionName: "allowance",
+        args: [accountAddress, approvalAddress],
+      });
+      if (allowance < fromAmount) approveData = encodeApprove(approvalAddress, fromAmount);
+    } catch (err) {
+      reportError(err);
+      return;
+    }
+  }
+
+  const txs: PreflightTx[] = [
+    ...(approveData
+      ? [{ label: `Approve ${sellToken.symbol}`, to: sellToken.address as Address, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
+      : []),
+    { label: "Swap", to: swapTo, data: swapData, whitelistNickname: `LI.FI (${quote.toolDetails?.name ?? quote.tool})` },
+  ];
+
+  const decision = await resolvePolicies(salt, accountId, selfAddress, chainId, isOwner, txs, "swap");
+  if (decision === "abort") return;
+  if (decision === "clear") {
+    const confirmed = await p.confirm({ message: "Execute this swap?" });
+    if (p.isCancel(confirmed) || !confirmed) return;
+  }
+
+  const submitBase = { accountId, chainId: Number(chainId), userAddress: selfAddress, walletClient, publicClient };
+  try {
+    if (approveData) {
+      await submitAndTrack(
+        salt,
+        { ...submitBase, to: sellToken.address as string, value: 0n, data: approveData },
+        `Approving ${sellToken.symbol}`,
+      );
+    }
+    const hash = await submitAndTrack(salt, { ...submitBase, to: swapTo, value: swapValue, data: swapData }, "Swapping");
+    p.log.success(
+      `Swapped ${amountInput} ${sellToken.symbol} → ~${toAmount} ${buyLabel} on ${chainName}` +
+        (hash ? `\n  tx hash: ${hash}` : "\n  (no broadcast receipt yet)"),
+    );
+    if (hash) {
+      const explorer = explorerTxUrl(chainId, hash);
+      if (explorer) console.log(`  tx link: ${explorer}`);
+    }
+  } catch (err) {
+    reportError(err);
+  }
 }
 
 async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
