@@ -3,9 +3,9 @@ import type { Salt } from "salt-sdk";
 import { type Address, createPublicClient, formatUnits, http, parseUnits } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
-import { getQuote, type LifiQuote, LIFI_NATIVE_TOKEN } from "../lifi.js";
+import { fetchTokenPricesUsd, getQuote, type LifiQuote, LIFI_NATIVE_TOKEN, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
-import { fetchAccountTokens } from "../token-balances.js";
+import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import {
   encodeApprove,
   encodeExactInputSingle,
@@ -104,8 +104,10 @@ async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): P
   const s = p.spinner();
   s.start(`Fetching balances on ${chainName}`);
   let tokens;
+  let prices = new Map<string, number>();
   try {
     tokens = await fetchAccountTokens(accountAddress, { raw: true, networks: [chainId] });
+    prices = await fetchTokenPricesUsd(tokens.map((t) => ({ chainId: t.chainId, address: t.address })));
     s.stop(`Found ${tokens.length} balance(s) on ${chainName}`);
   } catch (err) {
     s.stop("Failed to fetch balances");
@@ -123,7 +125,11 @@ async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): P
 
   const sellIndex = await select({
     message: "Swap which asset?",
-    options: sellable.map((t, index) => ({ value: index, label: t.symbol, hint: formatUnits(t.balance, t.decimals) })),
+    options: sellable.map((t, index) => ({
+      value: index,
+      label: t.symbol,
+      hint: formatBalanceHint(t.balance, t.decimals, prices.get(tokenPriceKey(t.chainId, t.address))),
+    })),
   });
   if (p.isCancel(sellIndex)) return;
   const sellToken = sellable[sellIndex];
@@ -352,8 +358,10 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   const s = p.spinner();
   s.start("Fetching balances");
   let tokens;
+  let prices = new Map<string, number>();
   try {
     tokens = await fetchAccountTokens(accountAddress, { raw: true, networks: [chainId] });
+    prices = await fetchTokenPricesUsd(tokens.map((t) => ({ chainId: t.chainId, address: t.address })));
     s.stop(`Found ${tokens.length} token balance(s) on ${chainName}`);
   } catch (err) {
     s.stop("Failed to fetch balances");
@@ -379,7 +387,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
     options: sellable.map((token, index) => ({
       value: index,
       label: token.symbol,
-      hint: formatUnits(token.balance, token.decimals),
+      hint: formatBalanceHint(token.balance, token.decimals, prices.get(tokenPriceKey(token.chainId, token.address))),
     })),
   });
   if (p.isCancel(sellIndex)) return;

@@ -3,9 +3,9 @@ import type { Salt } from "salt-sdk";
 import { type Address, createPublicClient, formatUnits, http, parseUnits } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
-import { getQuote, getStatus, type LifiQuote, LIFI_NATIVE_TOKEN } from "../lifi.js";
+import { fetchTokenPricesUsd, getQuote, getStatus, type LifiQuote, LIFI_NATIVE_TOKEN, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
-import { fetchAccountTokens } from "../token-balances.js";
+import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import { encodeApprove, ERC20_ABI, KNOWN_TOKENS_BY_CHAIN } from "../uniswap.js";
 import { type PreflightTx, resolvePolicies, submitAndTrack } from "./tx-preflight.js";
 import type { SaltWalletClient } from "../wallet.js";
@@ -80,8 +80,10 @@ export async function bridgeFlow(salt: Salt, walletClient: SaltWalletClient): Pr
   const s = p.spinner();
   s.start(`Fetching balances on ${fromChainName}`);
   let tokens;
+  let prices = new Map<string, number>();
   try {
     tokens = await fetchAccountTokens(accountAddress, { raw: true, networks: [fromChainId] });
+    prices = await fetchTokenPricesUsd(tokens.map((t) => ({ chainId: t.chainId, address: t.address })));
     s.stop(`Found ${tokens.length} balance(s) on ${fromChainName}`);
   } catch (err) {
     s.stop("Failed to fetch balances");
@@ -99,7 +101,11 @@ export async function bridgeFlow(salt: Salt, walletClient: SaltWalletClient): Pr
 
   const sellIndex = await select({
     message: "Bridge which asset?",
-    options: sendable.map((t, index) => ({ value: index, label: t.symbol, hint: formatUnits(t.balance, t.decimals) })),
+    options: sendable.map((t, index) => ({
+      value: index,
+      label: t.symbol,
+      hint: formatBalanceHint(t.balance, t.decimals, prices.get(tokenPriceKey(t.chainId, t.address))),
+    })),
   });
   if (p.isCancel(sellIndex)) return;
   const fromToken = sendable[sellIndex];
