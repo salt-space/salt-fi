@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Policy, Salt } from "salt-sdk";
-import { type Address, type PublicClient, WaitForTransactionReceiptTimeoutError } from "viem";
-import { formatSaltError } from "../errors.js";
+import { type Address, type PublicClient } from "viem";
+import { formatSaltError, txHashFromError } from "../errors.js";
 import { POLICY_TYPE_LABEL } from "../policies.js";
 import type { SaltWalletClient } from "../wallet.js";
 
@@ -51,20 +51,21 @@ export async function submitAndTrack(salt: Salt, params: SubmitParams, label: st
     s.stop(`${label} — complete`);
     return transaction.broadcastReceipt?.transactionHash;
   } catch (err) {
-    if (err instanceof WaitForTransactionReceiptTimeoutError) {
-      const hashMatch = err.message.match(/hash "(0x[0-9a-fA-F]+)"/);
-      if (hashMatch) {
-        s.message(`${label} — local confirmation timed out, checking directly...`);
-        try {
-          const receipt = await params.publicClient.waitForTransactionReceipt({
-            hash: hashMatch[1] as `0x${string}`,
-            timeout: 120_000,
-          });
-          s.stop(`${label} — complete (confirmation was just slow)`);
-          return receipt.transactionHash;
-        } catch {
-          // Fall through to failure.
-        }
+    // The ceremony broadcasts before it confirms, so an error here is usually a
+    // receipt-lookup problem (slow / flaky / archive-gated RPC), not a failed tx.
+    // If we can recover the broadcast hash the tx is already on-chain — return it
+    // (never surface "failed") so the caller reports the hash instead of implying
+    // nothing happened, which could trigger a dangerous re-submit.
+    const hash = txHashFromError(err);
+    if (hash) {
+      s.message(`${label} — broadcast, confirming on-chain...`);
+      try {
+        const receipt = await params.publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+        s.stop(`${label} — complete`);
+        return receipt.transactionHash;
+      } catch {
+        s.stop(`${label} — broadcast; confirm on the explorer`);
+        return hash;
       }
     }
     s.stop(`${label} — failed`);

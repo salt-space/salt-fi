@@ -75,7 +75,10 @@ export const SEND_NETWORK_IDS = SEND_NETWORK_IDS_BY_ENV[network.saltEnv];
  */
 const DEFAULT_RPC_BY_ID: Record<string, string> = {
   "1": "https://ethereum-rpc.publicnode.com",
-  "42161": "https://arbitrum-one-rpc.publicnode.com",
+  // Arbitrum's publicnode endpoint now gates eth_getTransactionReceipt as a paid
+  // "archive" request, which makes a successful send look failed. The official
+  // Arbitrum public RPC serves receipts fine.
+  "42161": "https://arb1.arbitrum.io/rpc",
   "10": "https://optimism-rpc.publicnode.com",
   "137": "https://polygon-bor-rpc.publicnode.com",
   "8453": "https://base-rpc.publicnode.com",
