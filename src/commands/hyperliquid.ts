@@ -1114,8 +1114,7 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
             ["Coin", "Side", "Size", "Leverage", "Entry", "Mark", "Notional", "Unrealized PnL", "Liq. price", "Margin", "Funding (P&L · rate)"],
             rows,
           ) +
-          "\n(Funding P&L: + earned / − paid, since the position opened. Rate: current hourly rate; " +
-          "'pay' = this side pays it, 'earn' = this side receives it. Funding settles hourly on notional.)",
+          "\n(Funding = P&L since open, +earned / −paid, at the current hourly rate)",
       );
     }
 
