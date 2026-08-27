@@ -9,6 +9,7 @@ import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
 import {
   hyperliquidDepositFlow,
+  hyperliquidEarnFlow,
   hyperliquidGettingStartedFlow,
   hyperliquidMoveFundsFlow,
   hyperliquidPortfolioFlow,
@@ -124,6 +125,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "hl-trade", label: "Trade", run: () => hyperliquidTradeFlow(salt, walletClient) },
         { value: "hl-portfolio", label: "Portfolio", run: () => hyperliquidPortfolioFlow(salt, walletClient) },
         { value: "hl-positions", label: "Positions", run: () => hyperliquidPositionsFlow(salt, walletClient) },
+        { value: "hl-earn", label: "Earn (HLP vault)", hint: "deposit USDC to HLP for a share of HL revenue", run: () => hyperliquidEarnFlow(salt, walletClient) },
       ],
     },
   };
