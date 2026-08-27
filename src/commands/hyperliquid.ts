@@ -1311,7 +1311,7 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
     s.stop("Positions");
 
     if (state.assetPositions.length === 0) {
-      p.log.info("No open positions.");
+      p.log.info("No open perp positions.");
     } else {
       const rows = state.assetPositions.map(({ position: pos }) => {
         const szi = Number(pos.szi);
