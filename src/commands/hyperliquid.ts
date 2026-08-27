@@ -1,8 +1,8 @@
 import * as p from "@clack/prompts";
 import type { Salt, SaltAccount, SaltTypedData } from "salt-sdk";
-import { createPublicClient, encodeFunctionData, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, formatUnits, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperEvmTestnet } from "../chains.js";
+import { CHAIN_BY_ID, explorerTxUrl, hyperEvmTestnet, rpcUrl } from "../chains.js";
 import { reportError } from "../errors.js";
 import {
   agentKeySigner,
@@ -25,6 +25,8 @@ import {
   fetchUserFills,
   findSpotPairAgainstUsdc,
   getAgentMetadata,
+  HL_ARBITRUM_DEPOSIT,
+  HL_MIN_DEPOSIT_USDC,
   marketOrderLimitPrice,
   MARKET_ORDER_SLIPPAGE,
   resolveSpotCoin,
@@ -981,6 +983,140 @@ async function advancedMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient)
   else if (choice === "withdraw") await rawWithdrawFlow(salt, walletClient);
   else if (choice === "toPerp") await rawUsdClassFlow(salt, walletClient, true);
   else await rawUsdClassFlow(salt, walletClient, false);
+}
+
+/**
+ * On-ramp USDC from Arbitrum One straight onto HyperCore, via Hyperliquid's
+ * native Arbitrum bridge (see {@link HL_ARBITRUM_DEPOSIT}). It's a plain
+ * native-USDC transfer to the bridge, signed by Salt's normal ceremony;
+ * HyperCore credits this same account's perp balance ~1 min later. Safer than a
+ * hand-typed send: the verified bridge address is hardcoded, only native USDC is
+ * used, and the 5-USDC minimum (below which funds are lost) is enforced.
+ */
+export async function hyperliquidDepositFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  if (!HL_ARBITRUM_DEPOSIT) {
+    p.log.info(
+      "On testnet, fund HyperCore with the faucet — claim mock USDC and it lands in your HyperCore balance " +
+        "directly, no Arbitrum bridge needed. The Arbitrum → HyperCore deposit is a mainnet feature.",
+    );
+    return;
+  }
+  const { bridge, usdc, chainId } = HL_ARBITRUM_DEPOSIT;
+
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Deposit to HyperCore for which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const accountAddress = account.evmAddress as Address;
+
+  const publicClient = createPublicClient({ chain: CHAIN_BY_ID[chainId], transport: http(rpcUrl(chainId)) });
+
+  // The account's own native-USDC balance on Arbitrum One.
+  const s = p.spinner();
+  s.start("Checking your Arbitrum USDC balance");
+  let usdcAvailable: number;
+  try {
+    const raw = await publicClient.readContract({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [accountAddress] });
+    usdcAvailable = Number(formatUnits(raw, 6));
+    s.stop(`Arbitrum One USDC available: ${fmtNum(usdcAvailable)}`);
+  } catch (err) {
+    s.stop("Couldn't read your Arbitrum USDC balance");
+    reportError(err);
+    return;
+  }
+  if (usdcAvailable < HL_MIN_DEPOSIT_USDC) {
+    p.log.warn(
+      `You need at least ${HL_MIN_DEPOSIT_USDC} USDC on Arbitrum One to deposit (Hyperliquid's minimum). ` +
+        `This account has ${fmtNum(usdcAvailable)} — bridge some USDC to Arbitrum first (Assets → Bridge assets).`,
+    );
+    return;
+  }
+
+  // Current HyperCore balance, for context + to detect the credit afterwards.
+  let beforeValue = 0;
+  try {
+    const perp = await fetchClearinghouseState(accountAddress);
+    beforeValue = Number(perp.marginSummary.accountValue);
+    p.log.message(`Current HyperCore perp balance: ${fmtUsd(beforeValue)}`);
+  } catch {
+    // Non-fatal — first-time accounts have no clearinghouse state yet.
+  }
+
+  const amountInput = await p.text({
+    message: `Amount of USDC to deposit (available: ${fmtNum(usdcAvailable)}, min ${HL_MIN_DEPOSIT_USDC})`,
+    placeholder: String(Math.floor(usdcAvailable)),
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "Not a valid amount";
+      if (n < HL_MIN_DEPOSIT_USDC) return `Minimum deposit is ${HL_MIN_DEPOSIT_USDC} USDC — anything less is NOT credited`;
+      if (n > usdcAvailable) return `Exceeds available balance (${fmtNum(usdcAvailable)} USDC)`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+  const amount = parseUnits(amountInput, 6);
+
+  p.note(
+    `Deposit ${amountInput} USDC\n` +
+      `  from:  ${account.name} on Arbitrum One\n` +
+      `  to:    Hyperliquid bridge (${bridge})\n` +
+      `  lands: this account's HyperCore perp balance, in ~1 min\n` +
+      `  ⚠ real funds, irreversible — the bridge credits the SENDING account`,
+    "HyperCore deposit",
+  );
+  const confirmed = await p.confirm({ message: "Send this deposit?" });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  // A plain native-USDC transfer to the bridge, signed by Salt's normal ceremony.
+  const s2 = p.spinner();
+  s2.start("Depositing to HyperCore");
+  let hash: string | undefined;
+  try {
+    const ceremony = await salt.submitTx({
+      accountId,
+      to: usdc,
+      value: 0n,
+      data: encodeErc20Transfer(bridge, amount),
+      chainId: Number(chainId),
+      userAddress: walletClient.account.address,
+      walletClient,
+      publicClient,
+    });
+    ceremony.on("stateChanged", (e) => s2.message(`Depositing — ${e.stage}...`));
+    ceremony.on("presence", (e) => s2.message(`Depositing — waiting for signers: ${e.joined}/${e.total} joined`));
+    const { transaction } = await ceremony.wait();
+    hash = transaction.broadcastReceipt?.transactionHash;
+    s2.stop("Deposit confirmed on Arbitrum");
+  } catch (err) {
+    s2.stop("Deposit failed");
+    reportError(err);
+    return;
+  }
+  const explorer = hash ? explorerTxUrl(chainId, hash) : undefined;
+  p.log.success(
+    `Sent ${amountInput} USDC to the Hyperliquid bridge` +
+      (explorer ? `\n  ${explorer}` : hash ? `\n  tx hash: ${hash}` : ""),
+  );
+
+  // Follow the credit onto HyperCore (~1 min after Arbitrum finality).
+  const s3 = p.spinner();
+  s3.start("Waiting for HyperCore to credit the deposit (~1 min)");
+  const deadline = Date.now() + 3 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5_000));
+    try {
+      const perp = await fetchClearinghouseState(accountAddress);
+      const now = Number(perp.marginSummary.accountValue);
+      if (now > beforeValue + 1e-6) {
+        s3.stop(`Credited — HyperCore perp balance is now ${fmtUsd(now)}`);
+        return;
+      }
+    } catch {
+      // keep polling — transient
+    }
+  }
+  s3.stop("Deposit sent — still waiting on HyperCore to credit it");
+  p.log.info("It usually lands within a minute or two. Check Hyperliquid → Portfolio shortly to confirm.");
 }
 
 export async function hyperliquidMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {

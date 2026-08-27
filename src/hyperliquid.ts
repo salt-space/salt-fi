@@ -80,6 +80,33 @@ export const HYPE_CORE_SYSTEM_ADDRESS: Address = "0x2222222222222222222222222222
 export const HYPE_USDC_SPOT_PAIR_INDEX = hlEnv.hypeUsdcSpotPairIndex;
 
 /**
+ * Hyperliquid's native deposit bridge on Arbitrum. Send **native Arbitrum USDC**
+ * here and HyperCore credits the SENDING address's perp balance (~1 min after the
+ * Arbitrum tx confirms). It's a plain ERC-20 transfer — no Hyperliquid-specific
+ * signing scheme — so Salt's normal transaction ceremony signs it.
+ *
+ * Mainnet only: the `Bridge2` contract + native-USDC addresses are verified
+ * on-chain (the contract custodies all HL deposits) and against Hyperliquid's
+ * docs. On **testnet** HyperCore is funded by the faucet (mock USDC lands
+ * directly), so there's no Arbitrum-bridge deposit — this is `null` and the flow
+ * points users at the faucet instead.
+ *
+ * ⚠ The bridge accepts ONLY native USDC (`0xaf88…5831`) and enforces a
+ * {@link HL_MIN_DEPOSIT_USDC} minimum — a smaller deposit is NOT credited.
+ */
+export const HL_ARBITRUM_DEPOSIT: { bridge: Address; usdc: Address; chainId: string } | null =
+  network.saltEnv === "mainnet"
+    ? {
+        bridge: "0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7",
+        usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        chainId: "42161",
+      }
+    : null;
+
+/** Hyperliquid's minimum Arbitrum deposit, in USDC — below this the funds are NOT credited. */
+export const HL_MIN_DEPOSIT_USDC = 5;
+
+/**
  * The HyperEVM deposit destination for a given HyperCore spot token: `0x20`
  * followed by zero-padding, with the token's Core index in the trailing bytes
  * (big-endian). An ERC-20 `transfer()` of that token to this address on

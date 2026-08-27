@@ -8,6 +8,7 @@ import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organis
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
 import {
+  hyperliquidDepositFlow,
   hyperliquidGettingStartedFlow,
   hyperliquidMoveFundsFlow,
   hyperliquidPortfolioFlow,
@@ -118,6 +119,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       title: "Hyperliquid",
       entries: [
         { value: "hl-getting-started", label: "Getting Started", run: () => hyperliquidGettingStartedFlow(salt, walletClient) },
+        { value: "hl-deposit", label: "Deposit from Arbitrum", hint: "USDC on Arbitrum One → HyperCore", run: () => hyperliquidDepositFlow(salt, walletClient) },
         { value: "hl-move-funds", label: "Move Funds", run: () => hyperliquidMoveFundsFlow(salt, walletClient) },
         { value: "hl-trade", label: "Trade", run: () => hyperliquidTradeFlow(salt, walletClient) },
         { value: "hl-portfolio", label: "Portfolio", run: () => hyperliquidPortfolioFlow(salt, walletClient) },
