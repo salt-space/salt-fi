@@ -660,6 +660,36 @@ export function fetchMeta(): Promise<PerpMeta> {
   return fetchInfo({ type: "meta" });
 }
 
+/**
+ * Per-asset live context from `metaAndAssetCtxs`, index-aligned with the meta
+ * `universe`. `funding` is the current **hourly** funding rate as a decimal
+ * string (e.g. "0.0000125" = 0.00125%/hr); a positive rate means longs pay
+ * shorts. `markPx`/`oraclePx` are the perp mark and spot-oracle prices.
+ */
+export interface AssetCtx {
+  funding: string;
+  markPx: string;
+  oraclePx: string;
+  openInterest: string;
+  premium: string | null;
+}
+
+/** `[meta, assetCtxs]` where `assetCtxs[i]` corresponds to `meta.universe[i]`. Shape confirmed live against mainnet. */
+export function fetchMetaAndAssetCtxs(): Promise<[PerpMeta, AssetCtx[]]> {
+  return fetchInfo({ type: "metaAndAssetCtxs" });
+}
+
+/** coin → current hourly funding rate (as a number), from `metaAndAssetCtxs`. Positive = longs pay shorts. */
+export async function fetchFundingRates(): Promise<Map<string, number>> {
+  const [meta, ctxs] = await fetchMetaAndAssetCtxs();
+  const out = new Map<string, number>();
+  meta.universe.forEach((asset, i) => {
+    const funding = ctxs[i]?.funding;
+    if (funding !== undefined) out.set(asset.name, Number(funding));
+  });
+  return out;
+}
+
 export interface SpotBalance {
   coin: string;
   token: number;

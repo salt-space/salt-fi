@@ -17,6 +17,7 @@ import {
   fetchAllMids,
   fetchClearinghouseState,
   fetchExtraAgents,
+  fetchFundingRates,
   fetchL2Book,
   fetchMeta,
   fetchOpenOrders,
@@ -252,6 +253,22 @@ function fmtPct(fraction: number): string {
 
 function fmtSide(side: OrderSide): string {
   return side === "B" ? "Buy " : "Sell";
+}
+
+/**
+ * A compact per-position funding cell: accrued **Funding P&L** since the position
+ * opened (+ earned / − paid) plus the **current hourly rate** and whether THIS
+ * position pays or earns it. `cumFundingSinceOpen` follows Hyperliquid's
+ * convention (positive = funding *paid*), so the trader's Funding P&L is its
+ * negation. `rate` is the coin's current hourly funding (positive = longs pay);
+ * a position pays when its side matches the rate's sign.
+ */
+function fundingCell(szi: number, cumFundingSinceOpen: number, rate: number | undefined): string {
+  const pnl = fmtSignedUsd(-cumFundingSinceOpen); // + = net received, − = net paid
+  if (rate === undefined) return pnl;
+  if (rate === 0) return `${pnl}  0%/h flat`;
+  const paying = Math.sign(szi) === Math.sign(rate); // long + positive rate ⇒ pays
+  return `${pnl}  ${(rate * 100).toFixed(4)}%/h ${paying ? "pay" : "earn"}`;
 }
 
 function timeAgo(ts: number): string {
@@ -1154,6 +1171,9 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
     const marginUsed = Number(perpSummary.totalMarginUsed);
     const maintenanceMargin = Number(crossMaintenanceMarginUsed);
     const unrealizedPnl = assetPositions.reduce((sum, ap) => sum + Number(ap.position.unrealizedPnl), 0);
+    // Funding P&L across open positions: + earned / − paid since each opened. cumFunding is
+    // positive when funding was *paid* (Hyperliquid's convention), so negate for a trader-facing P&L.
+    const fundingPnl = assetPositions.reduce((sum, ap) => sum - Number(ap.position.cumFunding.sinceOpen), 0);
     // Margin ratio: how much of account equity is tied up as margin — the standard "how close to a margin call" gauge on perp venues.
     const marginRatio = accountValue > 0 ? marginUsed / accountValue : 0;
 
@@ -1162,6 +1182,7 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
         `  Account equity        ${fmtUsd(accountValue)}\n` +
         `  Withdrawable           ${fmtUsd(Number(withdrawable))}\n` +
         `  Unrealized PnL         ${fmtSignedUsd(unrealizedPnl)}\n` +
+        (assetPositions.length > 0 ? `  Funding P&L (open)     ${fmtSignedUsd(fundingPnl)}  (+ earned / − paid)\n` : "") +
         `  Margin used            ${fmtUsd(marginUsed)} (${(marginRatio * 100).toFixed(1)}% of equity)\n` +
         `  Maintenance margin     ${fmtUsd(maintenanceMargin)}\n` +
         `  Open positions          ${assetPositions.length}`,
@@ -1192,12 +1213,13 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
   const s = p.spinner();
   s.start("Fetching positions");
   try {
-    const [state, openOrders, fills, mids, spotMeta] = await Promise.all([
+    const [state, openOrders, fills, mids, spotMeta, fundingRates] = await Promise.all([
       fetchClearinghouseState(userAddress),
       fetchOpenOrders(userAddress),
       fetchUserFills(userAddress),
       fetchAllMids(),
       fetchSpotMeta(),
+      fetchFundingRates(),
     ]);
     s.stop("Positions");
 
@@ -1219,18 +1241,16 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
           `${fmtSignedUsd(Number(pos.unrealizedPnl))} (${fmtPct(Number(pos.returnOnEquity))})`,
           pos.liquidationPx ? fmtNum(pos.liquidationPx) : "-",
           fmtUsd(Number(pos.marginUsed)),
-          // Shown as Hyperliquid returns it (unverified sign convention — treat this column as
-          // "net funding cash flow since open" and double check against the app's own history
-          // if precision matters, rather than trusting the sign blindly).
-          fmtSignedUsd(Number(pos.cumFunding.sinceOpen)),
+          fundingCell(szi, Number(pos.cumFunding.sinceOpen), fundingRates.get(pos.coin)),
         ];
       });
       p.log.message(
         "Open positions\n" +
           renderTable(
-            ["Coin", "Side", "Size", "Leverage", "Entry", "Mark", "Notional", "Unrealized PnL", "Liq. price", "Margin", "Funding (since open)"],
+            ["Coin", "Side", "Size", "Leverage", "Entry", "Mark", "Notional", "Unrealized PnL", "Liq. price", "Margin", "Funding (P&L · rate)"],
             rows,
-          ),
+          ) +
+          "\n(Funding = P&L since open, +earned / −paid, at the current hourly rate)",
       );
     }
 
