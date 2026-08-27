@@ -1220,6 +1220,25 @@ export async function hyperliquidMoveFundsFlow(salt: Salt, walletClient: SaltWal
 
 // --- Portfolio / Positions -----------------------------------------------------
 
+/**
+ * Render the account's HLP vault stake as a note body (equity, PnL, APR, lock
+ * status), or null if there's no position (or on testnet / a failed read). Shown
+ * in both Positions and Portfolio so deposited HLP funds — which leave the perp
+ * balance — stay visible in the total-account picture. Pass the result of
+ * {@link fetchVaultDetails} (with the user), or null.
+ */
+function hlpPositionNote(details: Awaited<ReturnType<typeof fetchVaultDetails>> | null): string | null {
+  const fs = details?.followerState;
+  if (!details || !fs || Number(fs.vaultEquity) <= 0) return null;
+  const locked = fs.lockupUntil > Date.now();
+  return (
+    `HLP vault (earn)\n` +
+    `  Equity   ${fmtUsd(Number(fs.vaultEquity))}\n` +
+    `  PnL      ${fmtSignedUsd(Number(fs.pnl))}\n` +
+    `  APR      ${(details.apr * 100).toFixed(1)}%  ${locked ? `(locked until ${new Date(fs.lockupUntil).toLocaleString()})` : "(unlocked)"}`
+  );
+}
+
 export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const picked = await pickHyperliquidAccount(salt, walletClient, "Portfolio for which account?");
   if (!picked) return;
@@ -1228,7 +1247,11 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
   const s = p.spinner();
   s.start("Fetching portfolio");
   try {
-    const [perp, spot] = await Promise.all([fetchClearinghouseState(userAddress), fetchSpotClearinghouseState(userAddress)]);
+    const [perp, spot, hlp] = await Promise.all([
+      fetchClearinghouseState(userAddress),
+      fetchSpotClearinghouseState(userAddress),
+      HLP_VAULT_ADDRESS ? fetchVaultDetails(HLP_VAULT_ADDRESS, userAddress).catch(() => null) : Promise.resolve(null),
+    ]);
     s.stop("Portfolio");
 
     const { marginSummary: perpSummary, crossMaintenanceMarginUsed, withdrawable, assetPositions } = perp;
@@ -1260,6 +1283,9 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
       });
       p.log.message(`Spot\n${renderTable(["Coin", "Total", "In orders", "Available"], rows)}`);
     }
+
+    const hlpNote = hlpPositionNote(hlp);
+    if (hlpNote) p.log.message(hlpNote);
   } catch (err) {
     s.stop("Failed to fetch portfolio");
     reportError(err);
@@ -1274,12 +1300,13 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
   const s = p.spinner();
   s.start("Fetching positions");
   try {
-    const [state, openOrders, fills, mids, spotMeta] = await Promise.all([
+    const [state, openOrders, fills, mids, spotMeta, hlp] = await Promise.all([
       fetchClearinghouseState(userAddress),
       fetchOpenOrders(userAddress),
       fetchUserFills(userAddress),
       fetchAllMids(),
       fetchSpotMeta(),
+      HLP_VAULT_ADDRESS ? fetchVaultDetails(HLP_VAULT_ADDRESS, userAddress).catch(() => null) : Promise.resolve(null),
     ]);
     s.stop("Positions");
 
@@ -1315,6 +1342,9 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
           ),
       );
     }
+
+    const hlpNote = hlpPositionNote(hlp);
+    if (hlpNote) p.log.message(hlpNote);
 
     if (openOrders.length === 0) {
       p.log.info("No open orders.");
