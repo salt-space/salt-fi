@@ -1,8 +1,8 @@
 import * as p from "@clack/prompts";
 import type { Salt, SaltAccount, SaltTypedData } from "salt-sdk";
-import { createPublicClient, encodeFunctionData, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
+import { createPublicClient, encodeFunctionData, erc20Abi, formatUnits, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperEvmTestnet } from "../chains.js";
+import { CHAIN_BY_ID, explorerTxUrl, hyperEvmTestnet, rpcUrl } from "../chains.js";
 import { reportError } from "../errors.js";
 import {
   agentKeySigner,
@@ -12,19 +12,24 @@ import {
   buildSendAssetTypedData,
   buildUpdateLeverageAction,
   buildUsdClassTransferTypedData,
+  buildVaultTransferAction,
   coreSystemAddress,
   extractActionErrors,
   fetchAllMids,
   fetchClearinghouseState,
   fetchExtraAgents,
+  fetchFundingRates,
   fetchL2Book,
   fetchMeta,
   fetchOpenOrders,
   fetchSpotClearinghouseState,
   fetchSpotMeta,
   fetchUserFills,
+  fetchVaultDetails,
   findSpotPairAgainstUsdc,
   getAgentMetadata,
+  HL_ARBITRUM_DEPOSIT,
+  HL_MIN_DEPOSIT_USDC,
   marketOrderLimitPrice,
   MARKET_ORDER_SLIPPAGE,
   resolveSpotCoin,
@@ -32,10 +37,13 @@ import {
   roundSpotPrice,
   signAndSubmitL1Action,
   spotAssetId,
+  HLP_LOCKUP_DAYS,
+  HLP_VAULT_ADDRESS,
   HYPE_CORE_SYSTEM_ADDRESS,
   HYPE_CORE_TOKEN_ID,
   HYPEREVM_CHAIN_ID,
   HYPEREVM_RPC_URL,
+  VAULT_MIN_DEPOSIT_USD,
   saveAgentMetadata,
   submitApproveAgent,
   submitSendAsset,
@@ -250,6 +258,22 @@ function fmtPct(fraction: number): string {
 
 function fmtSide(side: OrderSide): string {
   return side === "B" ? "Buy " : "Sell";
+}
+
+/**
+ * A compact per-position funding cell: accrued **Funding P&L** since the position
+ * opened (+ earned / − paid) plus the **current hourly rate** and whether THIS
+ * position pays or earns it. `cumFundingSinceOpen` follows Hyperliquid's
+ * convention (positive = funding *paid*), so the trader's Funding P&L is its
+ * negation. `rate` is the coin's current hourly funding (positive = longs pay);
+ * a position pays when its side matches the rate's sign.
+ */
+function fundingCell(szi: number, cumFundingSinceOpen: number, rate: number | undefined): string {
+  const pnl = fmtSignedUsd(-cumFundingSinceOpen); // + = net received, − = net paid
+  if (rate === undefined) return pnl;
+  if (rate === 0) return `${pnl}  0%/h flat`;
+  const paying = Math.sign(szi) === Math.sign(rate); // long + positive rate ⇒ pays
+  return `${pnl}  ${(rate * 100).toFixed(4)}%/h ${paying ? "pay" : "earn"}`;
 }
 
 function timeAgo(ts: number): string {
@@ -983,6 +1007,353 @@ async function advancedMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient)
   else await rawUsdClassFlow(salt, walletClient, false);
 }
 
+/**
+ * On-ramp USDC from Arbitrum One straight onto HyperCore, via Hyperliquid's
+ * native Arbitrum bridge (see {@link HL_ARBITRUM_DEPOSIT}). It's a plain
+ * native-USDC transfer to the bridge, signed by Salt's normal ceremony;
+ * HyperCore credits this same account's perp balance ~1 min later. Safer than a
+ * hand-typed send: the verified bridge address is hardcoded, only native USDC is
+ * used, and the 5-USDC minimum (below which funds are lost) is enforced.
+ */
+export async function hyperliquidDepositFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  if (!HL_ARBITRUM_DEPOSIT) {
+    p.log.info(
+      "On testnet, fund HyperCore with the faucet — claim mock USDC and it lands in your HyperCore balance " +
+        "directly, no Arbitrum bridge needed. The Arbitrum → HyperCore deposit is a mainnet feature.",
+    );
+    return;
+  }
+  const { bridge, usdc, chainId } = HL_ARBITRUM_DEPOSIT;
+
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Deposit to HyperCore for which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const accountAddress = account.evmAddress as Address;
+
+  const publicClient = createPublicClient({ chain: CHAIN_BY_ID[chainId], transport: http(rpcUrl(chainId)) });
+
+  // The account's own native-USDC balance on Arbitrum One.
+  const s = p.spinner();
+  s.start("Checking your Arbitrum USDC balance");
+  let usdcAvailable: number;
+  try {
+    const raw = await publicClient.readContract({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [accountAddress] });
+    usdcAvailable = Number(formatUnits(raw, 6));
+    s.stop(`Arbitrum One USDC available: ${fmtNum(usdcAvailable)}`);
+  } catch (err) {
+    s.stop("Couldn't read your Arbitrum USDC balance");
+    reportError(err);
+    return;
+  }
+  if (usdcAvailable < HL_MIN_DEPOSIT_USDC) {
+    p.log.warn(
+      `You need at least ${HL_MIN_DEPOSIT_USDC} USDC on Arbitrum One to deposit (Hyperliquid's minimum). ` +
+        `This account has ${fmtNum(usdcAvailable)} — bridge some USDC to Arbitrum first (Assets → Bridge assets).`,
+    );
+    return;
+  }
+
+  // Current HyperCore balance, for context + to detect the credit afterwards.
+  let beforeValue = 0;
+  try {
+    const perp = await fetchClearinghouseState(accountAddress);
+    beforeValue = Number(perp.marginSummary.accountValue);
+    p.log.message(`Current HyperCore perp balance: ${fmtUsd(beforeValue)}`);
+  } catch {
+    // Non-fatal — first-time accounts have no clearinghouse state yet.
+  }
+
+  const amountInput = await p.text({
+    message: `Amount of USDC to deposit (available: ${fmtNum(usdcAvailable)}, min ${HL_MIN_DEPOSIT_USDC})`,
+    placeholder: String(Math.floor(usdcAvailable)),
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "Not a valid amount";
+      if (n < HL_MIN_DEPOSIT_USDC) return `Minimum deposit is ${HL_MIN_DEPOSIT_USDC} USDC — anything less is NOT credited`;
+      if (n > usdcAvailable) return `Exceeds available balance (${fmtNum(usdcAvailable)} USDC)`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+  const amount = parseUnits(amountInput, 6);
+
+  p.note(
+    `Deposit ${amountInput} USDC\n` +
+      `  from:  ${account.name} on Arbitrum One\n` +
+      `  to:    Hyperliquid bridge (${bridge})\n` +
+      `  lands: this account's HyperCore perp balance, in ~1 min\n` +
+      `  ⚠ real funds, irreversible — the bridge credits the SENDING account`,
+    "HyperCore deposit",
+  );
+  const confirmed = await p.confirm({ message: "Send this deposit?" });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  // A plain native-USDC transfer to the bridge, signed by Salt's normal ceremony.
+  const s2 = p.spinner();
+  s2.start("Depositing to HyperCore");
+  let hash: string | undefined;
+  try {
+    const ceremony = await salt.submitTx({
+      accountId,
+      to: usdc,
+      value: 0n,
+      data: encodeErc20Transfer(bridge, amount),
+      chainId: Number(chainId),
+      userAddress: walletClient.account.address,
+      walletClient,
+      publicClient,
+    });
+    ceremony.on("stateChanged", (e) => s2.message(`Depositing — ${e.stage}...`));
+    ceremony.on("presence", (e) => s2.message(`Depositing — waiting for signers: ${e.joined}/${e.total} joined`));
+    const { transaction } = await ceremony.wait();
+    hash = transaction.broadcastReceipt?.transactionHash;
+    s2.stop("Deposit confirmed on Arbitrum");
+  } catch (err) {
+    s2.stop("Deposit failed");
+    reportError(err);
+    return;
+  }
+  const explorer = hash ? explorerTxUrl(chainId, hash) : undefined;
+  p.log.success(
+    `Sent ${amountInput} USDC to the Hyperliquid bridge` +
+      (explorer ? `\n  ${explorer}` : hash ? `\n  tx hash: ${hash}` : ""),
+  );
+
+  // Follow the credit onto HyperCore (~1 min after Arbitrum finality).
+  const s3 = p.spinner();
+  s3.start("Waiting for HyperCore to credit the deposit (~1 min)");
+  const deadline = Date.now() + 3 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5_000));
+    try {
+      const perp = await fetchClearinghouseState(accountAddress);
+      const now = Number(perp.marginSummary.accountValue);
+      if (now > beforeValue + 1e-6) {
+        s3.stop(`Credited — HyperCore perp balance is now ${fmtUsd(now)}`);
+        return;
+      }
+    } catch {
+      // keep polling — transient
+    }
+  }
+  s3.stop("Deposit sent — still waiting on HyperCore to credit it");
+  p.log.info("It usually lands within a minute or two. Check Hyperliquid → Portfolio shortly to confirm.");
+}
+
+/**
+ * Earn on idle USDC via Hyperliquid's HLP vault (see {@link HLP_VAULT_ADDRESS}):
+ * deposit from the account's HyperCore perp balance to earn a share of HL's
+ * market-making revenue, withdraw after the lock-up, or view your position + the
+ * live APR. Deposits/withdrawals are `vaultTransfer` L1 actions, signed the same
+ * way as orders (an approved agent, or a Salt MPC ceremony).
+ */
+export async function hyperliquidEarnFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  if (!HLP_VAULT_ADDRESS) {
+    p.log.info("The HLP vault is a mainnet feature — there's no HLP earn flow on testnet.");
+    return;
+  }
+  const vault = HLP_VAULT_ADDRESS;
+  const choice = await select({
+    message: "HLP vault (earn)",
+    options: [
+      { value: "view", label: "View HLP position", hint: "your equity, PnL, current APR" },
+      { value: "deposit", label: "Deposit to HLP", hint: "from your HyperCore perp balance" },
+      { value: "withdraw", label: "Withdraw from HLP", hint: `after the ${HLP_LOCKUP_DAYS}-day lock-up` },
+    ],
+  });
+  if (p.isCancel(choice)) return;
+  if (choice === "view") await hlpViewFlow(salt, walletClient, vault);
+  else if (choice === "deposit") await hlpDepositFlow(salt, walletClient, vault);
+  else await hlpWithdrawFlow(salt, walletClient, vault);
+}
+
+/** Sign + submit a `vaultTransfer` (deposit/withdraw) the same way orders are signed. Returns true on success. */
+async function submitVaultTransfer(
+  salt: Salt,
+  walletClient: SaltWalletClient,
+  accountId: string,
+  vault: Address,
+  isDeposit: boolean,
+  amountUsd: number,
+  label: string,
+): Promise<boolean> {
+  const signingChoice = await chooseOrderSigningMethod(accountId);
+  if (!signingChoice) return false;
+  const s = p.spinner();
+  s.start(signingChoice.kind === "mpc" ? "Starting signing ceremony" : label);
+  try {
+    const signer =
+      signingChoice.kind === "agent"
+        ? signingChoice.signer
+        : mpcCeremonySigner(salt, walletClient, accountId, (joined, total) => s.message(`Waiting for signers: ${joined}/${total} joined`));
+    const response = await signAndSubmitL1Action(signer, buildVaultTransferAction(vault, isDeposit, amountUsd));
+    const errors = extractActionErrors(response);
+    if (errors.length > 0) {
+      s.stop(`${label} — rejected`);
+      p.log.error(errors.join("\n"));
+      return false;
+    }
+    s.stop(`${label} — done`);
+    return true;
+  } catch (err) {
+    s.stop(`${label} — failed`);
+    reportError(err);
+    return false;
+  }
+}
+
+async function hlpViewFlow(salt: Salt, walletClient: SaltWalletClient, vault: Address): Promise<void> {
+  const picked = await pickHyperliquidAccount(salt, walletClient, "View HLP position for which account?");
+  if (!picked) return;
+  const accountAddress = picked.account.evmAddress as Address;
+
+  const s = p.spinner();
+  s.start("Fetching HLP vault + your position");
+  try {
+    const details = await fetchVaultDetails(vault, accountAddress);
+    s.stop("Fetched");
+    const fs = details.followerState;
+    const lines = [
+      `${details.name}`,
+      `  Current APR:  ${(details.apr * 100).toFixed(1)}%  (variable — can be negative)`,
+      fs ? `  Your equity:  ${fmtUsd(Number(fs.vaultEquity))}` : "  Your equity:  $0 (you haven't deposited)",
+    ];
+    if (fs) {
+      lines.push(`  Your PnL:     ${fmtUsd(Number(fs.pnl))}`);
+      lines.push(
+        fs.lockupUntil > Date.now()
+          ? `  Locked until: ${new Date(fs.lockupUntil).toLocaleString()}`
+          : "  Status:       unlocked — withdrawable now",
+      );
+    }
+    p.note(lines.join("\n"), "HLP position");
+  } catch (err) {
+    s.stop("Failed to fetch HLP details");
+    reportError(err);
+  }
+}
+
+async function hlpDepositFlow(salt: Salt, walletClient: SaltWalletClient, vault: Address): Promise<void> {
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Deposit to HLP from which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const accountAddress = account.evmAddress as Address;
+
+  // HLP deposits pull from the account's HyperCore perp (margin) balance.
+  const s = p.spinner();
+  s.start("Checking your HyperCore perp balance");
+  let available: number;
+  try {
+    const perp = await fetchClearinghouseState(accountAddress);
+    available = Number(perp.withdrawable);
+    s.stop(`Available in perp balance: ${fmtUsd(available)}`);
+  } catch (err) {
+    s.stop("Couldn't read your HyperCore balance");
+    reportError(err);
+    return;
+  }
+  if (available < VAULT_MIN_DEPOSIT_USD) {
+    p.log.warn(
+      `HLP's minimum deposit is $${VAULT_MIN_DEPOSIT_USD}, and this account has ${fmtUsd(available)} in its HyperCore perp ` +
+        "balance. Get USDC onto HyperCore first (Hyperliquid → Deposit from Arbitrum, or Move Funds).",
+    );
+    return;
+  }
+  try {
+    const details = await fetchVaultDetails(vault);
+    p.log.message(`HLP current APR: ${(details.apr * 100).toFixed(1)}% (variable, and it CAN be negative)`);
+  } catch {
+    // APR is just context — don't block the deposit if it fails.
+  }
+
+  const amountInput = await p.text({
+    message: `Amount of USDC to deposit into HLP (available: ${fmtNum(available)}, min ${VAULT_MIN_DEPOSIT_USD})`,
+    placeholder: String(Math.floor(available)),
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "Not a valid amount";
+      if (n < VAULT_MIN_DEPOSIT_USD) return `Minimum deposit is $${VAULT_MIN_DEPOSIT_USD}`;
+      if (n > available) return `Exceeds available (${fmtNum(available)} USDC)`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+
+  p.note(
+    `Deposit ${amountInput} USDC into HLP\n` +
+      `  from:  ${account.name} (HyperCore perp balance)\n` +
+      `  ⚠ LOCKED for ${HLP_LOCKUP_DAYS} days after deposit — you can't withdraw until then\n` +
+      `  ⚠ returns are variable and CAN be negative — HLP is market-making, not a savings account`,
+    "HLP deposit",
+  );
+  const confirmed = await p.confirm({ message: "Deposit to HLP?" });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  if (await submitVaultTransfer(salt, walletClient, accountId, vault, true, Number(amountInput), "Depositing to HLP")) {
+    p.log.success(
+      `Deposited ${amountInput} USDC into HLP — now earning yield.\n` +
+        `  Locked for ${HLP_LOCKUP_DAYS} days; use "View HLP position" to track equity + APR.`,
+    );
+  }
+}
+
+async function hlpWithdrawFlow(salt: Salt, walletClient: SaltWalletClient, vault: Address): Promise<void> {
+  const picked = await pickHyperliquidAccount(salt, walletClient, "Withdraw from HLP for which account?");
+  if (!picked) return;
+  const { accountId, account } = picked;
+  const accountAddress = account.evmAddress as Address;
+
+  const s = p.spinner();
+  s.start("Checking your HLP position");
+  let equity: number;
+  let lockupUntil: number;
+  try {
+    const details = await fetchVaultDetails(vault, accountAddress);
+    const fs = details.followerState;
+    equity = fs ? Number(fs.vaultEquity) : 0;
+    lockupUntil = fs ? fs.lockupUntil : 0;
+    s.stop(`Your HLP equity: ${fmtUsd(equity)}`);
+  } catch (err) {
+    s.stop("Couldn't read your HLP position");
+    reportError(err);
+    return;
+  }
+  if (equity <= 0) {
+    p.log.info("This account has no HLP position to withdraw.");
+    return;
+  }
+  if (lockupUntil > Date.now()) {
+    p.log.warn(
+      `Your HLP deposit is still within its ${HLP_LOCKUP_DAYS}-day lock-up — you can withdraw after ` +
+        `${new Date(lockupUntil).toLocaleString()}.`,
+    );
+    return;
+  }
+
+  const amountInput = await p.text({
+    message: `Amount of USDC to withdraw from HLP (your equity: ${fmtNum(equity)})`,
+    placeholder: String(Math.floor(equity)),
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "Not a valid amount";
+      if (n <= 0) return "Amount must be greater than 0";
+      if (n > equity) return `Exceeds your equity (${fmtNum(equity)} USDC)`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(amountInput)) return;
+
+  const confirmed = await p.confirm({ message: `Withdraw ${amountInput} USDC from HLP back to your perp balance?` });
+  if (p.isCancel(confirmed) || !confirmed) return;
+
+  if (await submitVaultTransfer(salt, walletClient, accountId, vault, false, Number(amountInput), "Withdrawing from HLP")) {
+    p.log.success(`Withdrew ${amountInput} USDC from HLP — it's back in your HyperCore perp balance.`);
+  }
+}
+
 export async function hyperliquidMoveFundsFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const choice = await select({
     message: "Move funds",
@@ -1002,6 +1373,25 @@ export async function hyperliquidMoveFundsFlow(salt: Salt, walletClient: SaltWal
 
 // --- Portfolio / Positions -----------------------------------------------------
 
+/**
+ * Render the account's HLP vault stake as a note body (equity, PnL, APR, lock
+ * status), or null if there's no position (or on testnet / a failed read). Shown
+ * in both Positions and Portfolio so deposited HLP funds — which leave the perp
+ * balance — stay visible in the total-account picture. Pass the result of
+ * {@link fetchVaultDetails} (with the user), or null.
+ */
+function hlpPositionNote(details: Awaited<ReturnType<typeof fetchVaultDetails>> | null): string | null {
+  const fs = details?.followerState;
+  if (!details || !fs || Number(fs.vaultEquity) <= 0) return null;
+  const locked = fs.lockupUntil > Date.now();
+  return (
+    `HLP vault (earn)\n` +
+    `  Equity   ${fmtUsd(Number(fs.vaultEquity))}\n` +
+    `  PnL      ${fmtSignedUsd(Number(fs.pnl))}\n` +
+    `  APR      ${(details.apr * 100).toFixed(1)}%  ${locked ? `(locked until ${new Date(fs.lockupUntil).toLocaleString()})` : "(unlocked)"}`
+  );
+}
+
 export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
   const picked = await pickHyperliquidAccount(salt, walletClient, "Portfolio for which account?");
   if (!picked) return;
@@ -1010,7 +1400,11 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
   const s = p.spinner();
   s.start("Fetching portfolio");
   try {
-    const [perp, spot] = await Promise.all([fetchClearinghouseState(userAddress), fetchSpotClearinghouseState(userAddress)]);
+    const [perp, spot, hlp] = await Promise.all([
+      fetchClearinghouseState(userAddress),
+      fetchSpotClearinghouseState(userAddress),
+      HLP_VAULT_ADDRESS ? fetchVaultDetails(HLP_VAULT_ADDRESS, userAddress).catch(() => null) : Promise.resolve(null),
+    ]);
     s.stop("Portfolio");
 
     const { marginSummary: perpSummary, crossMaintenanceMarginUsed, withdrawable, assetPositions } = perp;
@@ -1018,6 +1412,9 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
     const marginUsed = Number(perpSummary.totalMarginUsed);
     const maintenanceMargin = Number(crossMaintenanceMarginUsed);
     const unrealizedPnl = assetPositions.reduce((sum, ap) => sum + Number(ap.position.unrealizedPnl), 0);
+    // Funding P&L across open positions: + earned / − paid since each opened. cumFunding is
+    // positive when funding was *paid* (Hyperliquid's convention), so negate for a trader-facing P&L.
+    const fundingPnl = assetPositions.reduce((sum, ap) => sum - Number(ap.position.cumFunding.sinceOpen), 0);
     // Margin ratio: how much of account equity is tied up as margin — the standard "how close to a margin call" gauge on perp venues.
     const marginRatio = accountValue > 0 ? marginUsed / accountValue : 0;
 
@@ -1026,6 +1423,7 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
         `  Account equity        ${fmtUsd(accountValue)}\n` +
         `  Withdrawable           ${fmtUsd(Number(withdrawable))}\n` +
         `  Unrealized PnL         ${fmtSignedUsd(unrealizedPnl)}\n` +
+        (assetPositions.length > 0 ? `  Funding P&L (open)     ${fmtSignedUsd(fundingPnl)}  (+ earned / − paid)\n` : "") +
         `  Margin used            ${fmtUsd(marginUsed)} (${(marginRatio * 100).toFixed(1)}% of equity)\n` +
         `  Maintenance margin     ${fmtUsd(maintenanceMargin)}\n` +
         `  Open positions          ${assetPositions.length}`,
@@ -1042,6 +1440,9 @@ export async function hyperliquidPortfolioFlow(salt: Salt, walletClient: SaltWal
       });
       p.log.message(`Spot\n${renderTable(["Coin", "Total", "In orders", "Available"], rows)}`);
     }
+
+    const hlpNote = hlpPositionNote(hlp);
+    if (hlpNote) p.log.message(hlpNote);
   } catch (err) {
     s.stop("Failed to fetch portfolio");
     reportError(err);
@@ -1056,17 +1457,19 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
   const s = p.spinner();
   s.start("Fetching positions");
   try {
-    const [state, openOrders, fills, mids, spotMeta] = await Promise.all([
+    const [state, openOrders, fills, mids, spotMeta, fundingRates, hlp] = await Promise.all([
       fetchClearinghouseState(userAddress),
       fetchOpenOrders(userAddress),
       fetchUserFills(userAddress),
       fetchAllMids(),
       fetchSpotMeta(),
+      fetchFundingRates(),
+      HLP_VAULT_ADDRESS ? fetchVaultDetails(HLP_VAULT_ADDRESS, userAddress).catch(() => null) : Promise.resolve(null),
     ]);
     s.stop("Positions");
 
     if (state.assetPositions.length === 0) {
-      p.log.info("No open positions.");
+      p.log.info("No open perp positions.");
     } else {
       const rows = state.assetPositions.map(({ position: pos }) => {
         const szi = Number(pos.szi);
@@ -1083,20 +1486,21 @@ export async function hyperliquidPositionsFlow(salt: Salt, walletClient: SaltWal
           `${fmtSignedUsd(Number(pos.unrealizedPnl))} (${fmtPct(Number(pos.returnOnEquity))})`,
           pos.liquidationPx ? fmtNum(pos.liquidationPx) : "-",
           fmtUsd(Number(pos.marginUsed)),
-          // Shown as Hyperliquid returns it (unverified sign convention — treat this column as
-          // "net funding cash flow since open" and double check against the app's own history
-          // if precision matters, rather than trusting the sign blindly).
-          fmtSignedUsd(Number(pos.cumFunding.sinceOpen)),
+          fundingCell(szi, Number(pos.cumFunding.sinceOpen), fundingRates.get(pos.coin)),
         ];
       });
       p.log.message(
         "Open positions\n" +
           renderTable(
-            ["Coin", "Side", "Size", "Leverage", "Entry", "Mark", "Notional", "Unrealized PnL", "Liq. price", "Margin", "Funding (since open)"],
+            ["Coin", "Side", "Size", "Leverage", "Entry", "Mark", "Notional", "Unrealized PnL", "Liq. price", "Margin", "Funding (P&L · rate)"],
             rows,
-          ),
+          ) +
+          "\n(Funding = P&L since open, +earned / −paid, at the current hourly rate)",
       );
     }
+
+    const hlpNote = hlpPositionNote(hlp);
+    if (hlpNote) p.log.message(hlpNote);
 
     if (openOrders.length === 0) {
       p.log.info("No open orders.");

@@ -80,6 +80,51 @@ export const HYPE_CORE_SYSTEM_ADDRESS: Address = "0x2222222222222222222222222222
 export const HYPE_USDC_SPOT_PAIR_INDEX = hlEnv.hypeUsdcSpotPairIndex;
 
 /**
+ * Hyperliquid's native deposit bridge on Arbitrum. Send **native Arbitrum USDC**
+ * here and HyperCore credits the SENDING address's perp balance (~1 min after the
+ * Arbitrum tx confirms). It's a plain ERC-20 transfer — no Hyperliquid-specific
+ * signing scheme — so Salt's normal transaction ceremony signs it.
+ *
+ * Mainnet only: the `Bridge2` contract + native-USDC addresses are verified
+ * on-chain (the contract custodies all HL deposits) and against Hyperliquid's
+ * docs. On **testnet** HyperCore is funded by the faucet (mock USDC lands
+ * directly), so there's no Arbitrum-bridge deposit — this is `null` and the flow
+ * points users at the faucet instead.
+ *
+ * ⚠ The bridge accepts ONLY native USDC (`0xaf88…5831`) and enforces a
+ * {@link HL_MIN_DEPOSIT_USDC} minimum — a smaller deposit is NOT credited.
+ */
+export const HL_ARBITRUM_DEPOSIT: { bridge: Address; usdc: Address; chainId: string } | null =
+  network.saltEnv === "mainnet"
+    ? {
+        bridge: "0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7",
+        usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        chainId: "42161",
+      }
+    : null;
+
+/** Hyperliquid's minimum Arbitrum deposit, in USDC — below this the funds are NOT credited. */
+export const HL_MIN_DEPOSIT_USDC = 5;
+
+/**
+ * Hyperliquid's **HLP** (Hyperliquidity Provider) protocol vault — deposit USDC
+ * to earn a share of its market-making + liquidation revenue. Deposits pull from
+ * the account's HyperCore **perp** balance and are **LOCKED** for
+ * {@link HLP_LOCKUP_DAYS} days after the most recent deposit; returns are variable
+ * and CAN be negative (it's market-making, not a savings account).
+ *
+ * Mainnet only: the address is verified against `app.hyperliquid.xyz/vaults` and
+ * the live `/info` `vaultDetails` (name "Hyperliquidity Provider (HLP)"). On
+ * testnet this is `null` and the flow says so.
+ */
+export const HLP_VAULT_ADDRESS: Address | null =
+  network.saltEnv === "mainnet" ? "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303" : null;
+/** HLP's post-deposit lock-up, in days — you can't withdraw until it elapses. */
+export const HLP_LOCKUP_DAYS = 4;
+/** Hyperliquid's minimum vault deposit, in USD. */
+export const VAULT_MIN_DEPOSIT_USD = 20;
+
+/**
  * The HyperEVM deposit destination for a given HyperCore spot token: `0x20`
  * followed by zero-padding, with the token's Core index in the trailing bytes
  * (big-endian). An ERC-20 `transfer()` of that token to this address on
@@ -382,6 +427,17 @@ export function roundSpotPrice(price: number, szDecimals: number): number {
   return roundHyperliquidPrice(price, szDecimals, SPOT_MAX_PRICE_DECIMALS);
 }
 
+/**
+ * Builds a `{type: "vaultTransfer", ...}` L1 action — deposit into (or withdraw
+ * from) a Hyperliquid vault. `usd` on the wire is **micro-USD** (actual USD ×
+ * 1e6, an integer), matching Hyperliquid's Python SDK `vault_usd_transfer`.
+ * Deposits move USDC from the account's perp balance into the vault; withdrawals
+ * return it to the perp balance (subject to the vault's lock-up).
+ */
+export function buildVaultTransferAction(vaultAddress: Address, isDeposit: boolean, usd: number): Record<string, unknown> {
+  return { type: "vaultTransfer", vaultAddress, isDeposit, usd: Math.round(usd * 1_000_000) };
+}
+
 /** Hyperliquid's own Python SDK default slippage for its `market_open`/`market_close` helpers. */
 export const MARKET_ORDER_SLIPPAGE = 0.05;
 
@@ -614,6 +670,29 @@ export function fetchClearinghouseState(user: Address): Promise<ClearinghouseSta
   return fetchInfo({ type: "clearinghouseState", user });
 }
 
+/** A depositor's position in a vault (`followerState`), from `vaultDetails`. All amounts are decimal USD strings; `lockupUntil` is an epoch-ms timestamp. */
+export interface VaultFollowerState {
+  vaultEquity: string;
+  pnl: string;
+  allTimePnl: string;
+  lockupUntil: number;
+}
+
+/** Live vault info from `/info` `vaultDetails`. `apr` is a fraction (0.07 = 7%). `followerState` is the queried user's position, or null if they haven't deposited. */
+export interface VaultDetails {
+  name: string;
+  vaultAddress: string;
+  apr: number;
+  allowDeposits: boolean;
+  isClosed: boolean;
+  followerState: VaultFollowerState | null;
+}
+
+/** Vault details, optionally including `user`'s own position (`followerState`). Shape confirmed live against mainnet HLP. */
+export function fetchVaultDetails(vaultAddress: string, user?: string): Promise<VaultDetails> {
+  return fetchInfo(user ? { type: "vaultDetails", vaultAddress, user } : { type: "vaultDetails", vaultAddress });
+}
+
 export interface PerpMetaAsset {
   name: string;
   szDecimals: number;
@@ -631,6 +710,36 @@ export interface PerpMeta {
  */
 export function fetchMeta(): Promise<PerpMeta> {
   return fetchInfo({ type: "meta" });
+}
+
+/**
+ * Per-asset live context from `metaAndAssetCtxs`, index-aligned with the meta
+ * `universe`. `funding` is the current **hourly** funding rate as a decimal
+ * string (e.g. "0.0000125" = 0.00125%/hr); a positive rate means longs pay
+ * shorts. `markPx`/`oraclePx` are the perp mark and spot-oracle prices.
+ */
+export interface AssetCtx {
+  funding: string;
+  markPx: string;
+  oraclePx: string;
+  openInterest: string;
+  premium: string | null;
+}
+
+/** `[meta, assetCtxs]` where `assetCtxs[i]` corresponds to `meta.universe[i]`. Shape confirmed live against mainnet. */
+export function fetchMetaAndAssetCtxs(): Promise<[PerpMeta, AssetCtx[]]> {
+  return fetchInfo({ type: "metaAndAssetCtxs" });
+}
+
+/** coin → current hourly funding rate (as a number), from `metaAndAssetCtxs`. Positive = longs pay shorts. */
+export async function fetchFundingRates(): Promise<Map<string, number>> {
+  const [meta, ctxs] = await fetchMetaAndAssetCtxs();
+  const out = new Map<string, number>();
+  meta.universe.forEach((asset, i) => {
+    const funding = ctxs[i]?.funding;
+    if (funding !== undefined) out.set(asset.name, Number(funding));
+  });
+  return out;
 }
 
 export interface SpotBalance {

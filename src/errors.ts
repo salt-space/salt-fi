@@ -90,3 +90,19 @@ export function reportError(err: unknown): void {
   }
   p.log.error(formatSaltError(err));
 }
+
+/**
+ * Recover a broadcast transaction hash from an error thrown while *waiting for
+ * its receipt* — a viem receipt-timeout (`…hash "0x…"`) or a failed
+ * `eth_getTransactionReceipt` RPC call (the hash is in the request body). A
+ * ceremony broadcasts before it confirms, so such an error means "couldn't read
+ * the receipt", NOT "the transaction failed"; callers use this to report the
+ * hash instead of a misleading failure (which could trigger a dangerous
+ * re-send). Matches exactly 64 hex chars not part of a longer hex blob (so it
+ * won't grab calldata). Returns undefined if no hash is present.
+ */
+export function txHashFromError(err: unknown): `0x${string}` | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = msg.match(/0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/);
+  return match ? (match[0] as `0x${string}`) : undefined;
+}

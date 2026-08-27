@@ -1,9 +1,9 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { buildTransferTransaction, TransferType } from "salt-sdk";
-import { createPublicClient, formatUnits, http, parseUnits, WaitForTransactionReceiptTimeoutError } from "viem";
+import { createPublicClient, formatUnits, http, parseUnits } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
-import { reportError } from "../errors.js";
+import { reportError, txHashFromError } from "../errors.js";
 import { fetchTokenPricesUsd, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, select } from "../prompts.js";
 import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
@@ -290,27 +290,37 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
       if (explorer) console.log(`  tx link: ${explorer}`);
     }
   } catch (err) {
-    // The ceremony itself broadcasts and confirms the transaction — this
-    // timeout just means *our* wait gave up watching for the receipt, not
-    // that the transaction failed. It may well have already been mined, so
-    // check directly with a more patient timeout before reporting failure.
-    if (err instanceof WaitForTransactionReceiptTimeoutError) {
-      const hashMatch = err.message.match(/hash "(0x[0-9a-fA-F]+)"/);
-      if (hashMatch) {
-        const hash = hashMatch[1] as `0x${string}`;
-        s2.message("Local confirmation timed out — checking directly...");
-        try {
-          const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
-          s2.stop("Transaction complete (confirmation was just slow to arrive)");
-          p.log.success(`Sent ${amountInput} ${token.symbol} on ${chainName}\n  tx hash: ${receipt.transactionHash}\n  status: ${receipt.status}`);
-          const explorer = explorerTxUrl(token.chainId, receipt.transactionHash);
-          if (explorer) console.log(`  tx link: ${explorer}`);
-          return;
-        } catch {
-          // Genuinely not confirmed even with extra patience — fall through.
-        }
+    // The ceremony BROADCASTS the transaction before it waits for the receipt,
+    // so an error here is usually a receipt-lookup problem (slow / flaky /
+    // archive-gated RPC), NOT a failed transfer. If we can recover the broadcast
+    // hash, the transaction is already on-chain — confirm it if we can, but
+    // never report "failed" (that could trigger a dangerous re-send).
+    const hash = txHashFromError(err);
+    if (hash) {
+      s2.message("Broadcast succeeded — confirming on-chain...");
+      try {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+        const ok = receipt.status === "success";
+        s2.stop(ok ? "Transaction complete" : "Transaction reverted on-chain");
+        (ok ? p.log.success : p.log.error)(
+          `${ok ? "Sent" : "Reverted"}: ${amountInput} ${token.symbol} on ${chainName}\n` +
+            `  tx hash: ${receipt.transactionHash}\n  status: ${receipt.status}`,
+        );
+      } catch {
+        // Couldn't confirm from here (e.g. the RPC that broke is still broken) —
+        // but the transaction WAS broadcast. Report the hash; do NOT say failed.
+        s2.stop("Transaction broadcast — couldn't confirm from this RPC");
+        p.log.warn(
+          `Your ${amountInput} ${token.symbol} transfer was broadcast to ${chainName}, but this RPC couldn't confirm it.\n` +
+            `  tx hash: ${hash}\n` +
+            `  ⚠ It is very likely already on-chain — verify on the explorer below BEFORE re-sending.`,
+        );
       }
+      const explorer = explorerTxUrl(token.chainId, hash);
+      if (explorer) console.log(`  tx link: ${explorer}`);
+      return;
     }
+    // No hash to recover — the broadcast itself never happened.
     s2.stop("Transaction failed");
     reportError(err);
   }
