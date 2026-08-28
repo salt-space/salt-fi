@@ -355,9 +355,17 @@ export interface LimitOrderParams {
   size: number;
   reduceOnly?: boolean;
   tif?: "Gtc" | "Ioc" | "Alo";
+  /**
+   * Client order id — a caller-chosen 16-byte hex value Hyperliquid echoes back on the resulting
+   * order/fill. Lets a caller correlate a specific submission attempt with its eventual real
+   * outcome (via {@link fetchOpenOrders}/{@link fetchUserFills}) even after an ambiguous/timed-out
+   * HTTP response — there's no other way to do that, since L1 actions carry no on-chain hash to
+   * poll. Optional and omitted entirely when unset, so existing callers are unaffected.
+   */
+  cloid?: Hex;
 }
 
-/** Builds a single-order `{type: "order", ...}` L1 action. Field order within each order matters for the msgpack hash — don't reorder. */
+/** Builds a single-order `{type: "order", ...}` L1 action. Field order within each order matters for the msgpack hash — don't reorder; `c` (cloid), when present, goes last, matching Hyperliquid's own Python SDK. */
 export function buildLimitOrderAction(order: LimitOrderParams): Record<string, unknown> {
   return {
     type: "order",
@@ -369,6 +377,7 @@ export function buildLimitOrderAction(order: LimitOrderParams): Record<string, u
         s: floatToWire(order.size),
         r: order.reduceOnly ?? false,
         t: { limit: { tif: order.tif ?? "Gtc" } },
+        ...(order.cloid ? { c: order.cloid } : {}),
       },
     ],
     grouping: "na",
@@ -441,6 +450,9 @@ export function buildVaultTransferAction(vaultAddress: Address, isDeposit: boole
 /** Hyperliquid's own Python SDK default slippage for its `market_open`/`market_close` helpers. */
 export const MARKET_ORDER_SLIPPAGE = 0.05;
 
+/** Hyperliquid's minimum spot order value, confirmed via a live rejection ("Order must have minimum value of 10 USDC"). Shared by Fund Trading and the margin router so a spot-sell hop never gets planned/attempted below it. */
+export const SPOT_MIN_ORDER_USD = 10;
+
 /**
  * Hyperliquid has no literal "market order" type — a market order is an
  * aggressive IOC limit priced past the current mid by `slippage`, exactly
@@ -489,18 +501,25 @@ export interface L1ActionSigner {
   signAgent(args: { domain: unknown; types: unknown; primaryType: string; message: unknown }): Promise<HyperliquidSignature>;
 }
 
-/** Wraps a raw agent-wallet private key (held only in memory by the caller) as an {@link L1ActionSigner}. */
-export function agentKeySigner(privateKey: Hex): L1ActionSigner {
-  const account = privateKeyToAccount(privateKey);
+/** A viem local account — anything with `signTypedData` backed by an in-process key, e.g. `privateKeyToAccount(...)`'s return value or a `walletClient.account` built the same way. */
+interface TypedDataSigner {
+  signTypedData(args: Parameters<ReturnType<typeof privateKeyToAccount>["signTypedData"]>[0]): Promise<Hex>;
+}
+
+/** Wraps any already-constructed local account as an {@link L1ActionSigner} — the shared core both {@link agentKeySigner} and a caller reusing an already-loaded account (see `resolveAgentKeySigner`) build on. */
+export function accountSigner(account: TypedDataSigner): L1ActionSigner {
   return {
     async signAgent(args) {
-      const signatureHex = await account.signTypedData(
-        args as Parameters<typeof account.signTypedData>[0],
-      );
+      const signatureHex = await account.signTypedData(args as Parameters<typeof account.signTypedData>[0]);
       const { r, s, v } = hexToSignature(signatureHex);
       return { r, s, v: Number(v) };
     },
   };
+}
+
+/** Wraps a raw agent-wallet private key (held only in memory by the caller) as an {@link L1ActionSigner}. */
+export function agentKeySigner(privateKey: Hex): L1ActionSigner {
+  return accountSigner(privateKeyToAccount(privateKey));
 }
 
 export interface OrderStatusResting {
@@ -742,6 +761,22 @@ export async function fetchFundingRates(): Promise<Map<string, number>> {
   return out;
 }
 
+/**
+ * This user's actual maker/taker fee rates, as decimal fractions (e.g. `"0.00035"` = 0.035%).
+ * Every order this app submits is an aggressive IOC (crosses the book), so `userCrossRate` (the
+ * taker rate) is the one that applies to fee estimation; `userAddRate` (maker) is fetched too but
+ * unused today. Not independently re-verified live — first thing to check if an entry-fee
+ * estimate is ever noticeably off from a real fill's `fee`.
+ */
+export interface UserFees {
+  userCrossRate: string;
+  userAddRate: string;
+}
+
+export function fetchUserFees(user: Address): Promise<UserFees> {
+  return fetchInfo({ type: "userFees", user });
+}
+
 export interface SpotBalance {
   coin: string;
   token: number;
@@ -772,6 +807,8 @@ export interface OpenOrder {
   oid: number;
   timestamp: number;
   origSz: string;
+  /** Echoed back only for orders submitted with a {@link LimitOrderParams.cloid}; absent otherwise. */
+  cloid?: string;
 }
 
 /** Currently-open orders across all markets. */
@@ -791,6 +828,8 @@ export interface UserFill {
   fee: string;
   feeToken: string;
   oid: number;
+  /** Echoed back only for orders submitted with a {@link LimitOrderParams.cloid}; absent otherwise. */
+  cloid?: string;
 }
 
 /** Recent fills (trade history). */

@@ -18,6 +18,7 @@ import {
 } from "./commands/hyperliquid.js";
 import { manageInvitations } from "./commands/invitations.js";
 import { listenForNudgesFlow } from "./commands/nudges.js";
+import { strategiesFlow } from "./commands/strategies.js";
 import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./commands/organisations.js";
 import { policyChatFlow } from "./commands/policy-chat.js";
 import { policyManagementFlow } from "./commands/policy-management.js";
@@ -123,6 +124,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "hl-deposit", label: "Deposit from Arbitrum", hint: "USDC on Arbitrum One → HyperCore", run: () => hyperliquidDepositFlow(salt, walletClient) },
         { value: "hl-move-funds", label: "Move Funds", run: () => hyperliquidMoveFundsFlow(salt, walletClient) },
         { value: "hl-trade", label: "Trade", run: () => hyperliquidTradeFlow(salt, walletClient) },
+        { value: "hl-strategies", label: "Strategies ▸", run: () => strategiesFlow(salt, walletClient) },
         { value: "hl-portfolio", label: "Portfolio", run: () => hyperliquidPortfolioFlow(salt, walletClient) },
         { value: "hl-positions", label: "Positions", run: () => hyperliquidPositionsFlow(salt, walletClient) },
         { value: "hl-earn", label: "Earn (HLP vault)", hint: "deposit USDC to HLP for a share of HL revenue", run: () => hyperliquidEarnFlow(salt, walletClient) },
