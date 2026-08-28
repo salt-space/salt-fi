@@ -21,9 +21,12 @@ import { HYPEREVM_CHAIN_ID, HYPEREVM_RPC_URL } from "./hyperliquid.js";
  * chain maps below (not in SEND_NETWORK_IDS — Send/Balances don't enumerate it) so chain-id-keyed
  * lookups like `CHAIN_NAME_BY_ID` can name it instead of falling back to a bare number.
  */
-export const hyperEvmTestnet: Chain = {
+/** "HyperEVM" on mainnet, "HyperEVM Testnet" otherwise — `HYPEREVM_CHAIN_ID`/`HYPEREVM_RPC_URL` are
+ * already env-aware, so this is just the human label kept honest across environments. */
+const HYPEREVM_LABEL = network.saltEnv === "mainnet" ? "HyperEVM" : "HyperEVM Testnet";
+export const hyperEvmChain: Chain = {
   id: HYPEREVM_CHAIN_ID,
-  name: "HyperEVM Testnet",
+  name: HYPEREVM_LABEL,
   nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
   rpcUrls: { default: { http: [HYPEREVM_RPC_URL] } },
 };
@@ -40,7 +43,7 @@ export const CHAIN_BY_ID: Record<string, Chain> = {
   "137": polygon,
   "8453": base,
   // HyperEVM
-  [String(HYPEREVM_CHAIN_ID)]: hyperEvmTestnet,
+  [String(HYPEREVM_CHAIN_ID)]: hyperEvmChain,
 };
 
 export const CHAIN_NAME_BY_ID: Record<string, string> = {
@@ -53,7 +56,7 @@ export const CHAIN_NAME_BY_ID: Record<string, string> = {
   "10": "Optimism",
   "137": "Polygon",
   "8453": "Base",
-  [String(HYPEREVM_CHAIN_ID)]: "HyperEVM Testnet",
+  [String(HYPEREVM_CHAIN_ID)]: HYPEREVM_LABEL,
 };
 
 /** The chains "Send"/balances scan, per environment. */

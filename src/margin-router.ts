@@ -7,7 +7,7 @@
  */
 
 import { createPublicClient, http, parseAbi, type Address } from "viem";
-import { hyperEvmTestnet } from "./chains.js";
+import { hyperEvmChain } from "./chains.js";
 import {
   fetchAllMids,
   fetchClearinghouseState,
@@ -18,7 +18,7 @@ import {
 import type { MarginSources } from "./margin-router-math.js";
 
 function hyperEvmPublicClient() {
-  return createPublicClient({ chain: hyperEvmTestnet, transport: http(HYPEREVM_RPC_URL) });
+  return createPublicClient({ chain: hyperEvmChain, transport: http(HYPEREVM_RPC_URL) });
 }
 
 export interface HyperEvmBalances {

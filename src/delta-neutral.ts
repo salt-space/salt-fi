@@ -569,7 +569,10 @@ export async function computeDashboard(strategy: DeltaNeutralStrategy, userAddre
   ]);
 
   const spotBalanceEntry = spot.balances.find((b) => b.coin === strategy.spotSymbol);
-  const liveSpotQty = spotBalanceEntry ? Number(spotBalanceEntry.total) : 0;
+  // Available (sellable) qty: exclude anything on hold (e.g. resting orders), matching every other
+  // spot read in this codebase. planWindDown caps the sell size at this, so `total` alone would
+  // over-size the closing IOC beyond what can actually fill.
+  const liveSpotQty = spotBalanceEntry ? Number(spotBalanceEntry.total) - Number(spotBalanceEntry.hold) : 0;
   const perpPosition = perp.assetPositions.find((ap) => ap.position.coin === strategy.pair);
   const livePerpQty = perpPosition ? Number(perpPosition.position.szi) : 0;
 
@@ -594,7 +597,12 @@ export async function computeDashboard(strategy: DeltaNeutralStrategy, userAddre
   // Hyperliquid nets funding at the whole-position level, not per-strategy — accurate only if the
   // account's entire perp exposure in this pair belongs to this strategy. Surfaced as-is (matching this
   // app's existing cumFunding caveat elsewhere), not silently presented as exact.
-  const fundingReceived = perpPosition ? Number(perpPosition.position.cumFunding.sinceOpen) : strategy.accumulatedFunding;
+  // Hyperliquid's cumFunding.sinceOpen is POSITIVE when funding was *paid* — negate it for a
+  // trader-facing "received" figure (matches fundingCell / portfolio's fundingPnl convention). A
+  // delta-neutral short earning funding has a negative cumFunding, so this reads as income. This
+  // value also feeds executeWindDown → strategy.accumulatedFunding, so the fix carries through to
+  // the realized P&L.
+  const fundingReceived = perpPosition ? -Number(perpPosition.position.cumFunding.sinceOpen) : strategy.accumulatedFunding;
   const spotUnrealizedPnl = strategy.currentSpotQty * spotPrice - strategy.spotCostBasis;
   const perpUnrealizedPnl = perpPosition ? Number(perpPosition.position.unrealizedPnl) : 0;
   const strategyPnl = spotUnrealizedPnl + perpUnrealizedPnl + fundingReceived - strategy.fees;

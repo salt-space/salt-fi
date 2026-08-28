@@ -84,6 +84,12 @@ export function planFunding({ sources, requirement }: { sources: MarginSources; 
     unresolvedSpotUsdc -= take;
   }
 
+  // The spot-USDC requirement is satisfied first out of idle spot USDC (that's why the shortfall
+  // above nets it out: unresolvedSpotUsdc = requirement.spotUsdc - spotUsdc). Remove that reserved
+  // portion now, so the perp-margin pass below can't respend the same dollars — otherwise the plan
+  // reports "funded" while actually leaving the spot leg short.
+  spotUsdc = Math.max(0, spotUsdc - (requirement.spotUsdc ?? 0));
+
   // --- Perp margin shortfall: idle spot USDC (1 hop) -> spot HYPE sold first (2 hops) ->
   // HyperEVM USDC (2 hops) -> HyperEVM HYPE (3 hops).
   let unresolvedPerpMargin = Math.max(0, (requirement.perpMargin ?? 0) - sources.perp.withdrawable);

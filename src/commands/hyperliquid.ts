@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import type { Salt, SaltAccount, SaltTypedData } from "salt-sdk";
 import { createPublicClient, encodeFunctionData, erc20Abi, formatUnits, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { CHAIN_BY_ID, explorerTxUrl, hyperEvmTestnet, rpcUrl } from "../chains.js";
+import { CHAIN_BY_ID, explorerTxUrl, hyperEvmChain, rpcUrl } from "../chains.js";
 import { reportError } from "../errors.js";
 import {
   accountSigner,
@@ -76,6 +76,8 @@ import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+/** HYPE held back from any HyperEVM→Spot HYPE route to cover that transfer's own gas (HYPE is the HyperEVM gas token). */
+const HYPE_GAS_RESERVE = 0.02;
 
 /**
  * Org -> eligible-account picker shared by every Hyperliquid flow: an
@@ -464,7 +466,7 @@ type SupportedFundingAsset = "HYPE" | "USDC";
 const FUNDING_ASSET_DECIMALS: Record<SupportedFundingAsset, number> = { HYPE: 18, USDC: 6 };
 
 function hyperEvmPublicClient() {
-  return createPublicClient({ chain: hyperEvmTestnet, transport: http(HYPEREVM_RPC_URL) });
+  return createPublicClient({ chain: hyperEvmChain, transport: http(HYPEREVM_RPC_URL) });
 }
 
 const ERC20_TRANSFER_ABI = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
@@ -771,7 +773,11 @@ async function executeFundingStep(
           return true;
         }
         const balance = await hyperEvmPublicClient().getBalance({ address: userAddress });
-        const qty = await hypeQtyForUsd(step.amountUsd, Number(balance) / 1e18);
+        // Native HYPE is HyperEVM's gas token — never offer the whole balance to route, or this
+        // very transfer has nothing left to pay its own gas. Reserve a little; if the routed
+        // shortfall needs more than what remains, move what's spendable and let the caller re-solve.
+        const spendableHype = Math.max(0, Number(balance) / 1e18 - HYPE_GAS_RESERVE);
+        const qty = await hypeQtyForUsd(step.amountUsd, spendableHype);
         onProgress(`Moving ~${qty.toFixed(4)} HYPE — HyperEVM -> Spot`);
         await transferHyperEvmToSpot(salt, walletClient, accountId, "HYPE", parseUnits(qty.toFixed(18), 18), (msg) => onProgress(`Transferring — ${msg}`));
         return true;

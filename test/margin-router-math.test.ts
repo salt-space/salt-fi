@@ -105,3 +105,47 @@ describe("sellHopMeetsMinimum", () => {
     expect(sellHopMeetsMinimum(15, 10)).toBe(true);
   });
 });
+
+// Apply a plan's steps to the starting balances and return the final spot-USDC + perp margin,
+// so a "reports funded" plan can be checked against what it *actually* achieves — the guard against
+// double-counting the same idle dollar across both requirements.
+function applyPlan(s: MarginSources, steps: ReturnType<typeof planFunding>["steps"]) {
+  let spotUsdc = s.spot.usdc;
+  let spotHypeUsd = s.spot.hypeUsd;
+  let hyperEvmUsdc = s.hyperEvm.usdc ?? 0;
+  let hyperEvmHypeUsd = s.hyperEvm.nativeHypeUsd;
+  let perpMargin = s.perp.withdrawable;
+  for (const step of steps) {
+    if (step.kind === "hyperEvmToSpot" && step.asset === "USDC") { hyperEvmUsdc -= step.amountUsd; spotUsdc += step.amountUsd; }
+    else if (step.kind === "hyperEvmToSpot") { hyperEvmHypeUsd -= step.amountUsd; spotHypeUsd += step.amountUsd; }
+    else if (step.kind === "sellSpotHype") { spotHypeUsd -= step.amountUsd; spotUsdc += step.amountUsd; }
+    else if (step.kind === "spotToPerp") { spotUsdc -= step.amount; perpMargin += step.amount; }
+  }
+  return { spotUsdc, spotHypeUsd, hyperEvmUsdc, hyperEvmHypeUsd, perpMargin };
+}
+
+describe("planFunding — spot + perp requirements don't double-count the same dollars", () => {
+  it("actually funds BOTH legs when a plan reports resolved (regression: idle spot USDC reused across passes)", () => {
+    // Idle spot 600 partly covers the 1000 spot need; the 500 perp need must come from HyperEVM,
+    // NOT from the same 600 spot dollars the spot leg is already relying on.
+    const s = sources({ spot: { usdc: 600, hypeUsd: 0 }, hyperEvm: { usdc: 900, nativeHypeUsd: 0 }, perp: { withdrawable: 0 } });
+    const plan = planFunding({ sources: s, requirement: { spotUsdc: 1000, perpMargin: 500 } });
+
+    expect(plan.unresolvedSpotUsdc).toBe(0);
+    expect(plan.unresolvedPerpMargin).toBe(0);
+
+    // The real test: executing the plan leaves each leg at (or above) its requirement.
+    const end = applyPlan(s, plan.steps);
+    expect(end.spotUsdc).toBeGreaterThanOrEqual(1000);
+    expect(end.perpMargin).toBeGreaterThanOrEqual(500);
+    // …and no source was over-drawn.
+    expect(end.hyperEvmUsdc).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reports the true shortfall (not a false 'funded') when the combined requirements can't be met", () => {
+    // 600 spot + 300 HyperEVM = 900 total, but 1000 + 500 = 1500 is needed → genuinely short.
+    const s = sources({ spot: { usdc: 600, hypeUsd: 0 }, hyperEvm: { usdc: 300, nativeHypeUsd: 0 }, perp: { withdrawable: 0 } });
+    const plan = planFunding({ sources: s, requirement: { spotUsdc: 1000, perpMargin: 500 } });
+    expect(plan.unresolvedSpotUsdc + plan.unresolvedPerpMargin).toBeGreaterThan(0);
+  });
+});
