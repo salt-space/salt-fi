@@ -1313,7 +1313,7 @@ async function submitVaultTransfer(
   amountUsd: number,
   label: string,
 ): Promise<boolean> {
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) return false;
   const s = p.spinner();
   s.start(signingChoice.kind === "mpc" ? "Starting signing ceremony" : label);
