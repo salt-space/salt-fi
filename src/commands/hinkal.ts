@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "salt-sdk";
+import type { Policy, Salt } from "salt-sdk";
 import {
   createPublicClient,
   decodeEventLog,
@@ -295,6 +295,57 @@ async function actualRelayFee(ctx: HinkalContext, txHash: string, feeToken: Addr
     // Receipt not available yet, or a flaky RPC.
   }
   return quoted;
+}
+
+/**
+ * Warn — specifically, not generically — when a deposit is about to ask an owner to add
+ * the Hinkal pool to an allowed-recipients whitelist.
+ *
+ * `resolvePolicies` already offers to add a blocked `to` address, and its prompt reads
+ * the same whether the address is a swap router or this. It isn't the same. Whitelisting
+ * a router lets the account swap; whitelisting the pool lets the account pay anyone
+ * alive, forever, because everything after the deposit is relayed by Hinkal and never
+ * reaches Salt's policy engine at all. One keystroke, wearing the costume of a routine
+ * unblock — so the person with the authority to approve it should be told what it does
+ * before the generic prompt appears, not after.
+ *
+ * Only fires when the decision is actually live: a whitelist exists for this chain and
+ * the pool is not already on it. Best-effort; a failed policy read must not block a
+ * deposit that the preflight is about to check properly anyway.
+ */
+async function warnIfWideningWhitelist(salt: Salt, ctx: HinkalContext, pool: Address): Promise<void> {
+  let policies: Policy[];
+  try {
+    policies = await salt.listAccountPolicies(ctx.accountId);
+  } catch {
+    return;
+  }
+
+  // `chain` is an exact string match against the transaction's network, or '*' for all.
+  const applicable = policies.filter(
+    (policy) => policy.type === "allowed_recipients" && (policy.chain === "*" || policy.chain === String(ctx.chainId)),
+  );
+  if (applicable.length === 0) return;
+
+  const alreadyListed = applicable.some((policy) =>
+    ((policy.params as { recipients?: { address: string }[] }).recipients ?? []).some(
+      (recipient) => recipient.address.toLowerCase() === pool.toLowerCase(),
+    ),
+  );
+  if (alreadyListed) return;
+
+  p.log.warn(
+    "You are about to be asked to whitelist the Hinkal pool. That is not the same kind of\n" +
+      "decision as whitelisting a swap router, and the prompt below looks identical.\n\n" +
+      `Once ${pool} is on the list, anything this account\n` +
+      "shields can be paid out to ANY address by Hinkal's relayer. Withdrawals and transfers\n" +
+      "are broadcast by Hinkal, not by this account, so Salt never sees a transaction and the\n" +
+      "whitelist never applies to them.\n\n" +
+      "Adding this one address effectively retires the whitelist as a constraint on anything\n" +
+      "routed through Hinkal. It persists until an owner removes it, and every signer on the\n" +
+      "account can use it." +
+      (ctx.isOwner ? "" : "\n\nYou're not an owner, so you can't add it — but whoever you ask should see this too."),
+  );
 }
 
 /**
@@ -789,6 +840,8 @@ async function depositFlow(salt: Salt, walletClient: SaltWalletClient): Promise<
       : []),
     { label: "Deposit", to: call.to, data: call.data, whitelistNickname: "Hinkal pool" },
   ];
+  await warnIfWideningWhitelist(salt, ctx, call.to);
+
   const decision = await resolvePolicies(salt, ctx.accountId, ctx.selfAddress, String(ctx.chainId), ctx.isOwner, txs, "deposit");
   if (decision === "abort") return;
   if (decision === "clear") {
