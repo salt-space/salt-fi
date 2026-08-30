@@ -312,6 +312,36 @@ async function actualRelayFee(ctx: HinkalContext, txHash: string, feeToken: Addr
  * Only fires when the decision is actually live: a whitelist exists for this chain and
  * the pool is not already on it. Best-effort; a failed policy read must not block a
  * deposit that the preflight is about to check properly anyway.
+ *
+ * WHAT SALT'S POLICY ENGINE CAN AND CANNOT ENFORCE HERE, measured rather than assumed
+ * (temporary limit policy on Arbitrum, evaluated with `runPoliciesCheck`; a plain
+ * transfer was checked alongside each case to prove the limit was live):
+ *
+ *   allowed_recipients            all-or-nothing — whitelist the pool or don't
+ *   transaction_limit, native     WORKS: a native deposit carries the amount as the
+ *                                 transaction's `value`, which the limit reads
+ *   transaction_limit, ERC-20     does NOT fire: the tokens move by `transferFrom` from
+ *                                 inside the proof calldata, so nothing resembling a
+ *                                 `transfer(address,uint256)` is visible to match on
+ *   contract_param_restriction    cannot help: the deposit is `transact(...)`
+ *                                 (0x50fe69df), and the token addresses and amounts are
+ *                                 nested inside its 21-field `circomData` struct at
+ *                                 param 4. The engine addresses top-level params only,
+ *                                 with scalar operators — there is no way to reach
+ *                                 `circomData.amountChanges[0]`
+ *   nominated_approvers           would be the right control, but the SDK states it is
+ *                                 not implemented and refuses to create one
+ *
+ * So per-transaction caps are enforceable for native shielding and NOT for tokens —
+ * the wrong way round, since stablecoins are the main reason to shield. Don't assume
+ * a limit policy covers a USDC deposit; it does not.
+ *
+ * The near-miss, if this is ever revisited: the pool also exposes
+ * `prooflessDeposit(address[], uint256[], ...)` (0xbb3b5d78), with a matching
+ * `/proofless-deposit` API endpoint, whose tokens and amounts ARE top-level params.
+ * They are arrays, so today's engine still can't compare them — but array indexing in
+ * `contract_param_restriction` plus routing deposits that way would make per-deposit
+ * caps enforceable for tokens.
  */
 async function warnIfWideningWhitelist(salt: Salt, ctx: HinkalContext, pool: Address): Promise<void> {
   let policies: Policy[];
