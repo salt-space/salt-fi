@@ -1,4 +1,4 @@
-import { createWalletClient, http } from "viem";
+import { createWalletClient, http, serializeSignature, toHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, network } from "./env.js";
 
@@ -16,3 +16,15 @@ export function createSaltWalletClient() {
 }
 
 export type SaltWalletClient = ReturnType<typeof createSaltWalletClient>;
+
+/**
+ * Normalise the SDK's `{ r, s, v }` EvmSignature into a serialized hex string —
+ * what `verifyMessage` and any external verifier expect. Shared by every flow that
+ * consumes a Salt signing ceremony's result.
+ */
+export function toHexSig(s: unknown): Hex {
+  if (typeof s === "string") return s as Hex;
+  const o = s as { r: unknown; s: unknown; v?: unknown; yParity?: number };
+  const hexify = (x: unknown): Hex => (typeof x === "bigint" ? toHex(x, { size: 32 }) : (x as Hex));
+  return serializeSignature({ r: hexify(o.r), s: hexify(o.s), v: BigInt((o.v as number | bigint) ?? (o.yParity! + 27)) });
+}
