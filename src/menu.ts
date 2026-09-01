@@ -8,6 +8,13 @@ import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organis
 import { faucetFlow } from "./commands/faucet.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
 import {
+  hinkalBalanceFlow,
+  hinkalDepositFlow,
+  hinkalReceiveFlow,
+  hinkalTransferFlow,
+  hinkalWithdrawFlow,
+} from "./commands/hinkal.js";
+import {
   hyperliquidDepositFlow,
   hyperliquidEarnFlow,
   hyperliquidGettingStartedFlow,
@@ -117,6 +124,16 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "policy-chat", label: "Policy chat", run: () => policyChatFlow(salt, walletClient) },
       ],
     },
+    privacy: {
+      title: "Privacy (Hinkal)",
+      entries: [
+        { value: "hinkal-balance", label: "Shielded balance", hint: "what this account holds privately", run: () => hinkalBalanceFlow(salt, walletClient) },
+        { value: "hinkal-deposit", label: "Deposit", hint: "public → shielded; the only publicly visible leg", run: () => hinkalDepositFlow(salt, walletClient) },
+        { value: "hinkal-withdraw", label: "Withdraw", hint: "shielded → any public address, relayed by Hinkal", run: () => hinkalWithdrawFlow(salt, walletClient) },
+        { value: "hinkal-transfer", label: "Transfer", hint: "shielded → shielded; sender, recipient and amount all private", run: () => hinkalTransferFlow(salt, walletClient) },
+        { value: "hinkal-receive", label: "My receiving code", hint: "share out of band to be paid privately", run: () => hinkalReceiveFlow(salt, walletClient) },
+      ],
+    },
     hyperliquid: {
       title: "Hyperliquid",
       entries: [
@@ -143,6 +160,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "accounts", label: "Accounts ▸" },
         { value: "assets", label: "Assets ▸" },
         { value: "policies", label: "Policies ▸" },
+        { value: "privacy", label: "Privacy (Hinkal) ▸" },
         { value: "hyperliquid", label: "Hyperliquid ▸" },
         { value: EXIT, label: "Exit" },
       ],

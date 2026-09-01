@@ -1,17 +1,9 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
-import { serializeSignature, toHex, verifyMessage, type Hex } from "viem";
+import { verifyMessage } from "viem";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
-import type { SaltWalletClient } from "../wallet.js";
-
-/** Normalise the SDK's `{ r, s, v }` EvmSignature into a serialized hex string. */
-function toHexSig(s: unknown): Hex {
-  if (typeof s === "string") return s as Hex;
-  const o = s as { r: unknown; s: unknown; v?: unknown; yParity?: number };
-  const hexify = (x: unknown): Hex => (typeof x === "bigint" ? toHex(x, { size: 32 }) : (x as Hex));
-  return serializeSignature({ r: hexify(o.r), s: hexify(o.s), v: BigInt((o.v as number | bigint) ?? (o.yParity! + 27)) });
-}
+import { toHexSig, type SaltWalletClient } from "../wallet.js";
 
 /**
  * Sign an arbitrary message with a Salt account — EIP-191 `personal_sign`. Runs an
