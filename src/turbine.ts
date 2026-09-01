@@ -222,13 +222,17 @@ export function buildAddOrderTypedData(
 
 export interface Permit2Details {
   token: Address;
+  /** uint160 — big, goes on the wire as hex. */
   amount: bigint;
-  expiration: bigint;
-  nonce: bigint;
+  /** uint48 — a plain JS number (the backend wants a `u64`, not a hex string). */
+  expiration: number;
+  /** uint48 — a plain JS number. */
+  nonce: number;
 }
 export interface Permit2PermitSingle {
   details: Permit2Details;
   spender: Address;
+  /** uint256 — hex on the wire. */
   sigDeadline: bigint;
 }
 
@@ -236,12 +240,15 @@ export interface Permit2PermitSingle {
 export function buildPermit2Permit(params: {
   token: Address;
   spender: Address;
-  nonce: bigint;
+  /** Permit2 AllowanceTransfer nonce (uint48). */
+  nonce: number;
+  /** Order end time (seconds); used for both the permit's uint48 `expiration` and its uint256 `sigDeadline`. */
   deadline: bigint;
   chainId: number;
 }): { permit: Permit2PermitSingle; typedData: SaltTypedData } {
   const permit: Permit2PermitSingle = {
-    details: { token: params.token, amount: maxUint160, expiration: params.deadline, nonce: params.nonce },
+    // uint48 fields as numbers; uint160/uint256 as bigints — matches the SDK's on-wire types.
+    details: { token: params.token, amount: maxUint160, expiration: Number(params.deadline), nonce: params.nonce },
     spender: params.spender,
     sigDeadline: params.deadline,
   };
@@ -261,7 +268,7 @@ export async function readPermit2Nonce(
   owner: Address,
   token: Address,
   spender: Address,
-): Promise<bigint> {
+): Promise<number> {
   const res = (await publicClient.readContract({
     address: PERMIT2_ADDRESS,
     abi: [
@@ -284,7 +291,7 @@ export async function readPermit2Nonce(
     functionName: "allowance",
     args: [owner, token, spender],
   })) as [bigint, number, number];
-  return BigInt(res[2]);
+  return res[2]; // uint48 nonce, as a number
 }
 
 // --- Submission -------------------------------------------------------------------
