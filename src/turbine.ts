@@ -328,14 +328,20 @@ export async function submitAddOrder(params: {
   const res = await fetch(`${TURBINE_API}/eip712/add_order`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    // bigint → string; the backend parses uint256/uint64 from decimal strings.
-    body: JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString(10) : v)),
+    // The backend expects bigints as 0x-HEX strings (matches the SDK's `bigIntReplacer`);
+    // the auth `nonce` is deliberately a plain decimal string, so it's left untouched here.
+    body: JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? `0x${v.toString(16)}` : v)),
   });
   if (!res.ok) {
     let msg = `Turbine add_order failed (HTTP ${res.status})`;
     try {
-      const b = (await res.json()) as { message?: string; error?: string };
-      msg = b.message ?? b.error ?? msg;
+      const text = await res.text();
+      try {
+        const b = JSON.parse(text) as { message?: string; error?: string };
+        msg = b.message ?? b.error ?? `${msg}: ${text.slice(0, 300)}`;
+      } catch {
+        if (text) msg = `${msg}: ${text.slice(0, 300)}`;
+      }
     } catch {
       // keep status-based message
     }
