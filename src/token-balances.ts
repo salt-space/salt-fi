@@ -47,6 +47,98 @@ export interface FetchTokensOptions {
   onChainError?: (chainId: string, err: unknown) => void;
 }
 
+// --- Alchemy auto-discovery (any held ERC-20, not just the curated list) -----------
+
+/** Alchemy per-chain subdomains for the chains the app enumerates. */
+const ALCHEMY_SUBDOMAIN: Record<string, string> = {
+  "1": "eth-mainnet",
+  "42161": "arb-mainnet",
+  "10": "opt-mainnet",
+  "137": "polygon-mainnet",
+  "8453": "base-mainnet",
+  "11155111": "eth-sepolia",
+  "421614": "arb-sepolia",
+  "80002": "polygon-amoy",
+  "84532": "base-sepolia",
+};
+
+/**
+ * An Alchemy JSON-RPC URL for `chainId` if one is available — built from a standalone
+ * `ALCHEMY_API_KEY`, or reused directly from `SALT_RPC_<chainId>` when that's already an Alchemy
+ * endpoint. Returns undefined otherwise (→ the curated-list path).
+ */
+function alchemyUrlFor(chainId: string): string | undefined {
+  const key = process.env.ALCHEMY_API_KEY;
+  if (key && ALCHEMY_SUBDOMAIN[chainId]) return `https://${ALCHEMY_SUBDOMAIN[chainId]}.g.alchemy.com/v2/${key}`;
+  const url = rpcUrl(chainId);
+  return url && url.includes(".g.alchemy.com") ? url : undefined;
+}
+
+interface DiscoveredToken {
+  address: Address;
+  symbol: string;
+  name: string;
+  decimals: number;
+  balance: bigint;
+}
+
+async function alchemyRpc<T>(url: string, method: string, params: unknown[], timeout: number): Promise<T> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: ac.signal,
+    });
+    const body = (await res.json()) as { result?: T; error?: { message?: string } };
+    if (body.error) throw new Error(body.error.message ?? "alchemy rpc error");
+    return body.result as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Every ERC-20 the account holds a non-zero balance of on this chain, with metadata, via Alchemy's
+ * `alchemy_getTokenBalances` + `alchemy_getTokenMetadata`. Skips zero balances and tokens without
+ * usable metadata (filters most airdrop spam), capped at 100. Throws if the endpoint doesn't
+ * support the methods (e.g. the chain isn't enabled on the Alchemy app) so the caller can fall back.
+ */
+async function discoverTokensViaAlchemy(url: string, account: Address, timeout: number): Promise<DiscoveredToken[]> {
+  const balances = await alchemyRpc<{ tokenBalances: { contractAddress: Address; tokenBalance: string | null }[] }>(
+    url,
+    "alchemy_getTokenBalances",
+    [account, "erc20"],
+    timeout,
+  );
+  const held = (balances.tokenBalances ?? []).filter((t) => t.tokenBalance && BigInt(t.tokenBalance) > 0n).slice(0, 100);
+  const out = await Promise.all(
+    held.map(async (t): Promise<DiscoveredToken | null> => {
+      try {
+        const meta = await alchemyRpc<{ symbol?: string; name?: string; decimals?: number }>(
+          url,
+          "alchemy_getTokenMetadata",
+          [t.contractAddress],
+          timeout,
+        );
+        if (!meta.symbol || meta.decimals == null) return null;
+        return {
+          address: t.contractAddress,
+          symbol: meta.symbol,
+          name: meta.name ?? meta.symbol,
+          decimals: meta.decimals,
+          balance: BigInt(t.tokenBalance as string),
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return out.filter((x): x is DiscoveredToken => x !== null);
+}
+
 /**
  * External balance provider — replaces `salt.getAccountTokens`, which was
  * removed in salt-sdk 0.0.35 (Salt's direction: token balances come from
@@ -104,6 +196,21 @@ export async function fetchAccountTokens(
         const nativeBal = await client.getBalance({ address: account });
         const nc = chain.nativeCurrency;
         chainOut.push(entry(NATIVE_ADDRESS, nc.symbol, nc.name, nc.decimals, nativeBal, chainId));
+
+        // Auto-discover held ERC-20s via Alchemy when an Alchemy endpoint is available for this
+        // chain — so ANY token the account holds shows up, not just the curated shortlist. Falls
+        // back to the curated list when Alchemy isn't configured or the chain isn't enabled on it.
+        const alchemy = alchemyUrlFor(chainId);
+        if (alchemy) {
+          try {
+            for (const d of await discoverTokensViaAlchemy(alchemy, account, timeout)) {
+              chainOut.push(entry(d.address, d.symbol, d.name, d.decimals, d.balance, chainId));
+            }
+            return chainOut;
+          } catch {
+            // Alchemy method unsupported / chain not enabled on the app — fall through to curated.
+          }
+        }
 
         const reads = (KNOWN_TOKENS_BY_CHAIN[chainId] ?? []).map(async (t) => {
           try {
