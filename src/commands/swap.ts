@@ -15,6 +15,7 @@ import {
   UNISWAP_V3_BY_CHAIN,
 } from "../uniswap.js";
 import { type PreflightTx, resolvePolicies, submitAndTrack } from "./tx-preflight.js";
+import { turbineSlowSwapFlow } from "./turbine.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
@@ -27,13 +28,13 @@ export async function swapFlow(salt: Salt, walletClient: SaltWalletClient): Prom
     options: [
       { value: "aggregated", label: "Aggregated swap (LI.FI)", hint: "best route across DEXes; swaps native ETH too" },
       { value: "fast", label: "Fast swap (Uniswap v3)", hint: "direct Uniswap v3; ERC-20 → ERC-20 only" },
-      { value: "slow", label: "Slow swap (Turbine)", hint: "coming soon" },
+      { value: "slow", label: "Slow swap (Turbine)", hint: "patient intent order; better price, not instant (Ethereum)" },
     ],
   });
   if (p.isCancel(choice)) return;
 
   if (choice === "slow") {
-    p.log.info("Slow swap (Turbine) is coming soon — it's pending a testnet endpoint from the Turbine team.");
+    await turbineSlowSwapFlow(salt, walletClient);
     return;
   }
 
