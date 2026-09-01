@@ -2,9 +2,10 @@ import * as p from "@clack/prompts";
 import type { Salt, SaltAccount, SaltTypedData } from "salt-sdk";
 import { createPublicClient, encodeFunctionData, erc20Abi, formatUnits, http, parseAbi, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { CHAIN_BY_ID, explorerTxUrl, hyperEvmTestnet, rpcUrl } from "../chains.js";
+import { CHAIN_BY_ID, explorerTxUrl, hyperEvmChain, rpcUrl } from "../chains.js";
 import { reportError } from "../errors.js";
 import {
+  accountSigner,
   agentKeySigner,
   buildApproveAgentTypedData,
   buildCancelOrderAction,
@@ -39,6 +40,7 @@ import {
   spotAssetId,
   HLP_LOCKUP_DAYS,
   HLP_VAULT_ADDRESS,
+  SPOT_MIN_ORDER_USD,
   HYPE_CORE_SYSTEM_ADDRESS,
   HYPE_CORE_TOKEN_ID,
   HYPEREVM_CHAIN_ID,
@@ -68,17 +70,21 @@ import {
   estimateIsolatedLiquidationPrice,
   validateMargin,
 } from "../hyperliquid-risk.js";
+import { aggregateMarginSources } from "../margin-router.js";
+import { isAlreadyFunded, planFunding, sellHopMeetsMinimum, type FundingRequirement, type FundingStep, type MarginSources } from "../margin-router-math.js";
 import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+/** HYPE held back from any HyperEVM→Spot HYPE route to cover that transfer's own gas (HYPE is the HyperEVM gas token). */
+const HYPE_GAS_RESERVE = 0.02;
 
 /**
  * Org -> eligible-account picker shared by every Hyperliquid flow: an
  * "eligible" account is one that's finished MPC setup (has an `evmAddress`)
  * and that the caller is a signer on. Mirrors swap.ts's `fastSwapFlow`.
  */
-async function pickHyperliquidAccount(
+export async function pickHyperliquidAccount(
   salt: Salt,
   walletClient: SaltWalletClient,
   message: string,
@@ -153,10 +159,22 @@ const PRIVATE_KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
  * than failing confusingly at signature-verification time later), and caches the resulting
  * signer in memory for the rest of this session. Returns `undefined` on cancel or a mismatched
  * key — never caches or uses a key that doesn't match.
+ *
+ * Skips the prompt entirely when the approved agent *is* the account's own already-authenticated
+ * wallet (a common setup for testing: approving your existing signing wallet as the agent instead
+ * of generating a separate EOA) — `walletClient.account` already holds that key in-process
+ * (`createSaltWalletClient` builds it via `privateKeyToAccount`), so there's nothing left to ask
+ * for.
  */
-async function resolveAgentKeySigner(accountId: string, expectedAgentAddress: Address): Promise<L1ActionSigner | undefined> {
+export async function resolveAgentKeySigner(accountId: string, expectedAgentAddress: Address, walletClient: SaltWalletClient): Promise<L1ActionSigner | undefined> {
   const cached = agentSignerCache.get(accountId);
   if (cached) return cached;
+
+  if (walletClient.account.address.toLowerCase() === expectedAgentAddress.toLowerCase()) {
+    const signer = accountSigner(walletClient.account);
+    agentSignerCache.set(accountId, signer);
+    return signer;
+  }
 
   const keyInput = await p.password({
     message: `Private key for agent ${expectedAgentAddress}\nHeld in memory only for this run — never written to disk.`,
@@ -205,7 +223,7 @@ type SigningChoice = { kind: "agent"; signer: L1ActionSigner } | { kind: "mpc" }
  * presence updates to — see {@link mpcCeremonySigner}. Returns `undefined` on cancel or a
  * mismatched/rejected agent key.
  */
-async function chooseOrderSigningMethod(accountId: string): Promise<SigningChoice | undefined> {
+async function chooseOrderSigningMethod(accountId: string, walletClient: SaltWalletClient): Promise<SigningChoice | undefined> {
   const agentMeta = getAgentMetadata(accountId);
   const hasVerifiedAgent = Boolean(agentMeta?.lastVerified);
 
@@ -227,7 +245,7 @@ async function chooseOrderSigningMethod(accountId: string): Promise<SigningChoic
   if (p.isCancel(choice)) return undefined;
   if (choice === "mpc") return { kind: "mpc" };
 
-  const signer = await resolveAgentKeySigner(accountId, agentMeta!.agentAddress);
+  const signer = await resolveAgentKeySigner(accountId, agentMeta!.agentAddress, walletClient);
   return signer ? { kind: "agent", signer } : undefined;
 }
 
@@ -447,11 +465,8 @@ type SupportedFundingAsset = "HYPE" | "USDC";
 // USDC is 6 (spotMeta's weiDecimals=8 + evm_extra_wei_decimals=-2).
 const FUNDING_ASSET_DECIMALS: Record<SupportedFundingAsset, number> = { HYPE: 18, USDC: 6 };
 
-/** Hyperliquid's minimum spot order value, confirmed via a live rejection ("Order must have minimum value of 10 USDC"). */
-const SPOT_MIN_ORDER_USD = 10;
-
 function hyperEvmPublicClient() {
-  return createPublicClient({ chain: hyperEvmTestnet, transport: http(HYPEREVM_RPC_URL) });
+  return createPublicClient({ chain: hyperEvmChain, transport: http(HYPEREVM_RPC_URL) });
 }
 
 const ERC20_TRANSFER_ABI = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
@@ -460,7 +475,7 @@ function encodeErc20Transfer(to: Address, amount: bigint): `0x${string}` {
 }
 
 /** HyperEVM -> HyperCore Spot: a plain EVM transfer to Hyperliquid's system address, signed via Salt's normal transaction ceremony (no Hyperliquid-specific signing scheme involved). Returns the broadcast tx hash. */
-async function transferHyperEvmToSpot(
+export async function transferHyperEvmToSpot(
   salt: Salt,
   walletClient: SaltWalletClient,
   accountId: string,
@@ -504,7 +519,7 @@ async function transferSpotToHyperEvm(
 }
 
 /** HyperCore Spot <-> Perps, via the signed `UsdClassTransfer` L1 action (master-account MPC ceremony — see the note above). */
-async function transferUsdClass(
+export async function transferUsdClass(
   salt: Salt,
   walletClient: SaltWalletClient,
   accountId: string,
@@ -662,7 +677,7 @@ async function fundTradingFlow(salt: Salt, walletClient: SaltWalletClient): Prom
  * caller re-checks the resulting spot USDC balance instead of trusting the fill amount reported
  * here, since an IOC can partially fill.
  */
-async function sellSpotForUsdc(salt: Salt, walletClient: SaltWalletClient, accountId: string, baseAsset: string, size: number): Promise<boolean> {
+export async function sellSpotForUsdc(salt: Salt, walletClient: SaltWalletClient, accountId: string, baseAsset: string, size: number): Promise<boolean> {
   const s = p.spinner();
   s.start(`Fetching ${baseAsset}/USDC market`);
   let pairIndex: number;
@@ -684,7 +699,7 @@ async function sellSpotForUsdc(salt: Salt, walletClient: SaltWalletClient, accou
     return false;
   }
 
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) return false;
 
   // 2% below the best bid so a thin/wide-spread book (as observed on testnet) doesn't reject the
@@ -712,6 +727,132 @@ async function sellSpotForUsdc(salt: Salt, walletClient: SaltWalletClient, accou
     reportError(err);
     return false;
   }
+}
+
+// --- Unified margin: detect a shortfall across every bucket, offer to route it ------
+
+function describeFundingStep(step: FundingStep): string {
+  switch (step.kind) {
+    case "hyperEvmToSpot":
+      return `Move ~${fmtUsd(step.amountUsd)} of ${step.asset} — HyperEVM -> HyperCore Spot`;
+    case "sellSpotHype":
+      return `Sell ~${fmtUsd(step.amountUsd)} of HYPE for USDC on HyperCore's spot book`;
+    case "spotToPerp":
+      return `Move ${fmtUsd(step.amount)} USDC — HyperCore Spot -> Perps`;
+  }
+}
+
+/**
+ * Converts a target USD value into a HYPE token quantity to actually transfer/sell, using a
+ * fresh price (not the estimate `aggregateMarginSources` used at planning time, which can be
+ * slightly stale by execution time) plus a buffer so the sell step's own 2% underbid still clears
+ * the target — capped at what's actually on hand right now, so this never tries to move/sell more
+ * than is really there even if the plan's earlier estimate has since drifted.
+ */
+async function hypeQtyForUsd(amountUsd: number, availableHype: number): Promise<number> {
+  const mids = await fetchAllMids();
+  const price = Number(mids.HYPE ?? 0);
+  if (price <= 0) throw new Error("No live HYPE price available to size this step");
+  const withBuffer = amountUsd / price / 0.95;
+  return Math.min(withBuffer, availableHype);
+}
+
+async function executeFundingStep(
+  salt: Salt,
+  walletClient: SaltWalletClient,
+  accountId: string,
+  userAddress: Address,
+  step: FundingStep,
+  onProgress: (message: string) => void,
+): Promise<boolean> {
+  try {
+    switch (step.kind) {
+      case "hyperEvmToSpot": {
+        if (step.asset === "USDC") {
+          await transferHyperEvmToSpot(salt, walletClient, accountId, "USDC", parseUnits(step.amountUsd.toFixed(6), 6), (msg) => onProgress(`Transferring — ${msg}`));
+          return true;
+        }
+        const balance = await hyperEvmPublicClient().getBalance({ address: userAddress });
+        // Native HYPE is HyperEVM's gas token — never offer the whole balance to route, or this
+        // very transfer has nothing left to pay its own gas. Reserve a little; if the routed
+        // shortfall needs more than what remains, move what's spendable and let the caller re-solve.
+        const spendableHype = Math.max(0, Number(balance) / 1e18 - HYPE_GAS_RESERVE);
+        const qty = await hypeQtyForUsd(step.amountUsd, spendableHype);
+        onProgress(`Moving ~${qty.toFixed(4)} HYPE — HyperEVM -> Spot`);
+        await transferHyperEvmToSpot(salt, walletClient, accountId, "HYPE", parseUnits(qty.toFixed(18), 18), (msg) => onProgress(`Transferring — ${msg}`));
+        return true;
+      }
+      case "sellSpotHype": {
+        if (!sellHopMeetsMinimum(step.amountUsd, SPOT_MIN_ORDER_USD)) {
+          p.log.error(`Selling ~${fmtUsd(step.amountUsd)} of HYPE is below Hyperliquid's ${fmtUsd(SPOT_MIN_ORDER_USD)} spot order minimum — can't route this automatically.`);
+          return false;
+        }
+        const spot = await fetchSpotClearinghouseState(userAddress);
+        const hypeBalance = spot.balances.find((b) => b.coin === "HYPE");
+        const available = hypeBalance ? Number(hypeBalance.total) - Number(hypeBalance.hold) : 0;
+        const qty = await hypeQtyForUsd(step.amountUsd, available);
+        onProgress(`Selling ~${qty.toFixed(4)} HYPE for USDC`);
+        return await sellSpotForUsdc(salt, walletClient, accountId, "HYPE", qty);
+      }
+      case "spotToPerp": {
+        const spot = await fetchSpotClearinghouseState(userAddress);
+        const usdcBalance = spot.balances.find((b) => b.coin === "USDC");
+        const available = usdcBalance ? Number(usdcBalance.total) - Number(usdcBalance.hold) : 0;
+        // Floor to 6 decimals and cap at what's actually there — same edge Fund Trading already
+        // works around (Hyperliquid's coarser USD accounting rejects a technically-exact balance).
+        const amount = Math.floor(Math.min(step.amount, available) * 1e6) / 1e6;
+        if (amount <= 0) {
+          p.log.error("No USDC available on Spot to move to Perps — an earlier step may not have filled as expected.");
+          return false;
+        }
+        onProgress(`Moving ${fmtUsd(amount)} USDC — Spot -> Perps`);
+        await transferUsdClass(salt, walletClient, accountId, String(amount), true, (joined, total) => onProgress(`Waiting for signers: ${joined}/${total} joined`));
+        return true;
+      }
+    }
+  } catch (err) {
+    reportError(err);
+    return false;
+  }
+}
+
+/**
+ * Detects a funding shortfall across every bucket this app knows about (HyperEVM native HYPE,
+ * HyperEVM USDC, HyperCore Spot, HyperCore Perps margin), and — only when routing it would
+ * actually close the gap — offers to move/sell what's needed automatically, reusing the exact same
+ * primitives Fund Trading already uses. Silent no-op when `requirement` is already covered (the
+ * common case): no prompt, no delay. Returns `undefined` when there's nothing routable to cover
+ * the gap (the caller should fall back to its own not-enough-funds message) or the user declines.
+ */
+export async function ensureFunded(
+  salt: Salt,
+  walletClient: SaltWalletClient,
+  accountId: string,
+  userAddress: Address,
+  requirement: FundingRequirement,
+): Promise<MarginSources | undefined> {
+  const sources = await aggregateMarginSources(userAddress);
+  if (isAlreadyFunded(sources, requirement)) return sources;
+
+  const plan = planFunding({ sources, requirement });
+  if (plan.steps.length === 0 || plan.unresolvedSpotUsdc > 0 || plan.unresolvedPerpMargin > 0) return undefined;
+
+  p.note(plan.steps.map(describeFundingStep).join("\n"), "This needs more than one bucket currently holds");
+  const confirmed = await p.confirm({ message: "Move this automatically to proceed?" });
+  if (p.isCancel(confirmed) || !confirmed) return undefined;
+
+  for (const step of plan.steps) {
+    const s = p.spinner();
+    s.start(describeFundingStep(step));
+    const ok = await executeFundingStep(salt, walletClient, accountId, userAddress, step, (msg) => s.message(msg));
+    if (!ok) {
+      s.stop("Routing stopped partway through — check Move Funds -> Advanced for anything left stranded mid-move.");
+      return undefined;
+    }
+    s.stop("Done");
+  }
+
+  return aggregateMarginSources(userAddress);
 }
 
 // --- Withdraw Trading Funds: Perps -> Spot -> HyperEVM, always as USDC --------
@@ -1178,7 +1319,7 @@ async function submitVaultTransfer(
   amountUsd: number,
   label: string,
 ): Promise<boolean> {
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) return false;
   const s = p.spinner();
   s.start(signingChoice.kind === "mpc" ? "Starting signing ceremony" : label);
@@ -1578,7 +1719,9 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
 
   const equity = Number(perp.marginSummary.accountValue);
   const marginUsed = Number(perp.marginSummary.totalMarginUsed);
-  const availableMargin = Number(perp.withdrawable);
+  // Mutable: a margin request that exceeds this gets a chance to be routed in from another
+  // bucket (see the margin-amount step below) rather than hard-stopping here.
+  let availableMargin = Number(perp.withdrawable);
   const unrealizedPnl = perp.assetPositions.reduce((sum, ap) => sum + Number(ap.position.unrealizedPnl), 0);
 
   p.log.message(
@@ -1590,11 +1733,6 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
       `  Open positions        ${perp.assetPositions.length}\n` +
       `  Open orders           ${openOrders.length}`,
   );
-
-  if (availableMargin <= 0) {
-    p.log.error('No available perp collateral to trade with. Fund your account first — Move Funds -> "Fund Trading".');
-    return;
-  }
 
   // No verified-agent gate: an order can be signed by the account via a Salt MPC ceremony without
   // an approved agent (same as the spot sell), and chooseOrderSigningMethod below offers the fast
@@ -1660,12 +1798,27 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
   const isBuy = direction;
 
   // --- Margin --------------------------------------------------------------------
+  // Validated for basic sanity only here — a request over the current available margin gets a
+  // chance to be routed in from HyperEVM/Spot below instead of being rejected outright.
   const marginInput = await p.text({
     message: `Margin to allocate (available: ${fmtUsd(availableMargin)})`,
-    validate: (v) => (v ? validateMargin({ margin: Number(v), availableMargin }) : "Amount is required"),
+    validate: (v) => (v ? validateMargin({ margin: Number(v), availableMargin: Infinity }) : "Amount is required"),
   });
   if (p.isCancel(marginInput)) return;
   const margin = Number(marginInput);
+
+  if (margin > availableMargin) {
+    const routed = await ensureFunded(salt, walletClient, accountId, userAddress, { perpMargin: margin });
+    if (!routed) {
+      p.log.error(`Exceeds available margin (${fmtUsd(availableMargin)}), and nothing routable elsewhere covers the difference.`);
+      return;
+    }
+    availableMargin = routed.perp.withdrawable;
+    if (margin > availableMargin) {
+      p.log.error(`Still short after routing — available margin is now ${fmtUsd(availableMargin)}.`);
+      return;
+    }
+  }
 
   // --- Leverage --------------------------------------------------------------------
   const leverageOptions = computeLeverageOptions(asset.maxLeverage);
@@ -1752,7 +1905,7 @@ async function placeOrderFlow(salt: Salt, walletClient: SaltWalletClient): Promi
   // --- Execute --------------------------------------------------------------------
   // Offer the same choice the other order paths do: the approved agent's key (fast, no ceremony)
   // or a Salt MPC ceremony (no local key). Prompts run before the spinner starts.
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) {
     p.log.warn("No signing method chosen — order not sent.");
     return;
@@ -1827,7 +1980,7 @@ async function cancelOrderFlow(salt: Salt, walletClient: SaltWalletClient): Prom
   const confirmed = await p.confirm({ message: `Cancel ${order.coin} ${fmtSide(order.side)} ${fmtNum(order.sz)} @ ${fmtNum(order.limitPx)}?` });
   if (p.isCancel(confirmed) || !confirmed) return;
 
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) return;
 
   const s2 = p.spinner();
@@ -1953,7 +2106,7 @@ async function closePositionFlow(salt: Salt, walletClient: SaltWalletClient): Pr
   const confirmed = await p.confirm({ message: "Close this position?" });
   if (p.isCancel(confirmed) || !confirmed) return;
 
-  const signingChoice = await chooseOrderSigningMethod(accountId);
+  const signingChoice = await chooseOrderSigningMethod(accountId, walletClient);
   if (!signingChoice) {
     p.log.warn("No signing method chosen — position not closed.");
     return;
