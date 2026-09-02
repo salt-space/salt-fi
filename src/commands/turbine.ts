@@ -135,17 +135,19 @@ export async function turbineSlowSwapFlow(salt: Salt, walletClient: SaltWalletCl
   if (p.isCancel(buyChoice)) return;
   const buy = config.tokens.find((t) => t.address.toLowerCase() === (buyChoice as string).toLowerCase())!;
 
-  // --- amount ---
+  // --- amount ("max" / "all" sells the whole balance) ---
+  const isMax = (v: string) => ["max", "all"].includes(v.trim().toLowerCase());
   const amountInput = await p.text({
     message: `Amount of ${sell.symbol} to sell (available: ${maxSell})`,
-    placeholder: maxSell,
+    placeholder: `${maxSell}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMax(v)) return undefined;
       let parsed: bigint;
       try {
         parsed = parseUnits(v, sell.decimals);
       } catch {
-        return "Not a valid amount";
+        return 'Not a valid amount (or type "max")';
       }
       if (parsed <= 0n) return "Must be greater than 0";
       if (parsed > sellBalance) return `Exceeds balance (${maxSell} ${sell.symbol})`;
@@ -153,7 +155,8 @@ export async function turbineSlowSwapFlow(salt: Salt, walletClient: SaltWalletCl
     },
   });
   if (p.isCancel(amountInput)) return;
-  const sellAmount = parseUnits(amountInput, sell.decimals);
+  // Use the raw balance for "max" so it's exact to the wei (no format→parse round-trip).
+  const sellAmount = isMax(amountInput) ? sellBalance : parseUnits(amountInput, sell.decimals);
 
   // --- reference price (best-effort, via LI.FI same-chain quote) + slippage → minBuyAmount ---
   let referenceOut: bigint | undefined;
