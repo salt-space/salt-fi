@@ -1,9 +1,40 @@
 import { formatUnits } from "viem";
-import type { ContractParamRestrictionOperator, Policy, PolicyType } from "salt-sdk";
+import type { ContractParamRestrictionOperator, Policy, PolicyType, Salt } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "./chains.js";
 
 export const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
 export const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+
+/** Fixed gas limit used only to satisfy runPoliciesCheck's required payload shape (see below). */
+const POLICY_CHECK_GAS_LIMIT = "500000";
+
+/**
+ * Gas/fee fields for a {@link Salt.runPoliciesCheck} payload.
+ *
+ * salt-sdk 0.0.42 made `gas` / `maxFeePerGas` / `maxPriorityFeePerGas` (decimal-string wei)
+ * REQUIRED on `TransactionObjectParams` — including the read-only policy pre-flight, which
+ * evaluates policies but never signs or submits. Our policies are recipient / transaction-limit
+ * based and don't evaluate gas, so the check's outcome doesn't depend on these values; we fill
+ * the fees from the live network price (`salt.getGasPrice`) and a generous fixed gas limit.
+ *
+ * Best-effort: if the fee read fails the check still runs (a zero fee is a valid EIP-1559 value,
+ * and this is advisory — not the transaction that eventually gets signed).
+ */
+export async function policyCheckGasFields(
+  salt: Salt,
+  chainId: number,
+): Promise<{ gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string }> {
+  try {
+    const g = await salt.getGasPrice(chainId);
+    return {
+      gas: POLICY_CHECK_GAS_LIMIT,
+      maxFeePerGas: g.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: g.maxPriorityFeePerGas.toString(),
+    };
+  } catch {
+    return { gas: POLICY_CHECK_GAS_LIMIT, maxFeePerGas: "0", maxPriorityFeePerGas: "0" };
+  }
+}
 
 /** Fallback name lookup for addresses with no nickname stored on the policy itself. */
 export type ResolveLabel = (address: string) => string | undefined;

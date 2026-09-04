@@ -161,7 +161,6 @@ export async function setUpRoboHost(
       host = await salt.createRoboHost({
         name: roboName,
         organisationId,
-        ownerAddress: walletClient.account.address,
       });
       s.stop("Robo host registered");
     } catch (err) {

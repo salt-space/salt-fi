@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import type { Policy, Salt } from "salt-sdk";
 import { type Address, type PublicClient } from "viem";
 import { formatSaltError, txHashFromError } from "../errors.js";
-import { POLICY_TYPE_LABEL } from "../policies.js";
+import { policyCheckGasFields, POLICY_TYPE_LABEL } from "../policies.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 /**
@@ -133,6 +133,7 @@ export async function resolvePolicies(
 ): Promise<PolicyDecision> {
   const runChecks = async () => {
     const nonce = await salt.getAccountNonce(accountId, Number(chainId));
+    const gasFields = await policyCheckGasFields(salt, Number(chainId));
     const out: { tx: PreflightTx; check: Awaited<ReturnType<Salt["runPoliciesCheck"]>> }[] = [];
     for (const tx of txs) {
       const check = await salt.runPoliciesCheck(accountId, {
@@ -142,6 +143,7 @@ export async function resolvePolicies(
         to: tx.to,
         network: chainId,
         data: tx.data,
+        ...gasFields,
       });
       out.push({ tx, check });
     }

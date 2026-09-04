@@ -25,7 +25,7 @@
     "@noble/curves": "^1.9.1",
     "@noble/hashes": "^1.8.0",
     "dotenv": "^17.4.2",
-    "salt-sdk": "^0.0.40",
+    "salt-sdk": "^0.0.42",
     "viem": "^2.55.0"
   },
   "devDependencies": {
