@@ -1,11 +1,11 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { buildTransferTransaction, TransferType } from "salt-sdk";
-import { createPublicClient, formatUnits, http, parseUnits } from "viem";
+import { createPublicClient, formatUnits, http } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError, txHashFromError } from "../errors.js";
 import { fetchTokenPricesUsd, tokenPriceKey } from "../lifi.js";
-import { pickOrganisation, select } from "../prompts.js";
+import { pickOrganisation, promptTokenAmount, select } from "../prompts.js";
 import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import type { SaltWalletClient } from "../wallet.js";
 
@@ -159,7 +159,6 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
       gasSpinner.stop("Couldn't estimate gas (RPC too slow) — using full balance");
     }
   }
-  const maxSendableFormatted = formatUnits(maxSendable, token.decimals);
 
   const OTHER_ADDRESS = "__other" as const;
   const otherAccountsInOrg = accounts.filter((account) => account.id !== accountId && Boolean(account.evmAddress));
@@ -198,24 +197,17 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
     recipientLabel = to;
   }
 
-  const amountInput = await p.text({
-    message: `Amount of ${token.symbol} to send (available: ${maxSendableFormatted}${isNative ? ", after reserving estimated gas" : ""})`,
-    placeholder: maxSendableFormatted,
-    validate: (value) => {
-      if (!value) return "Amount is required";
-      let parsed: bigint;
-      try {
-        parsed = parseUnits(value, token.decimals);
-      } catch {
-        return "Not a valid amount";
-      }
-      if (parsed <= 0n) return "Amount must be greater than 0";
-      if (parsed > maxSendable) return `Exceeds available balance (${maxSendableFormatted} ${token.symbol})`;
-      return undefined;
-    },
+  const value = await promptTokenAmount({
+    verb: "send",
+    symbol: token.symbol,
+    decimals: token.decimals,
+    maxRaw: maxSendable,
+    note: isNative ? ", after reserving estimated gas" : "",
   });
-  if (p.isCancel(amountInput)) return;
-  const value = parseUnits(amountInput, token.decimals);
+  if (value === null) return;
+  // Formatted amount for the confirm/result messages below (so "max" shows as the
+  // resolved number, not the literal word).
+  const amountInput = formatUnits(value, token.decimals);
 
   const confirmed = await p.confirm({
     message: `Send ${amountInput} ${token.symbol} on ${chainName} to ${recipientLabel}?`,
