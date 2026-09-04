@@ -274,6 +274,17 @@ function fmtPct(fraction: number): string {
   return `${sign}${(fraction * 100).toFixed(2)}%`;
 }
 
+/** True if the user typed "max"/"all" (case-insensitive) at an amount prompt — shorthand for the whole available balance. */
+const isMaxWord = (v: string) => ["max", "all"].includes(v.trim().toLowerCase());
+
+/**
+ * The full available balance to use when the user asks for "max", floored to 6 decimals
+ * (USDC precision). HyperCore's USD accounting is coarser than the float we read back and
+ * rejects an amount that rounds above the true balance, so flooring keeps "max" always
+ * ≤ available — the same guard {@link fundTradingFlow} applies to full-balance moves.
+ */
+const maxAmount = (available: number) => String(Math.floor(available * 1e6) / 1e6);
+
 function fmtSide(side: OrderSide): string {
   return side === "B" ? "Buy " : "Sell";
 }
@@ -880,17 +891,20 @@ async function withdrawTradingFundsFlow(salt: Salt, walletClient: SaltWalletClie
     return;
   }
 
-  const amountInput = await p.text({
-    message: "Amount of USDC to withdraw from trading",
+  const amountRaw = await p.text({
+    message: `Amount of USDC to withdraw from trading (available: ${fmtNum(withdrawable)})`,
+    placeholder: `${Math.floor(withdrawable)}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const n = Number(v);
       if (!Number.isFinite(n) || n <= 0) return "Enter a positive number";
       if (n > withdrawable) return `Exceeds available collateral (${fmtUsd(withdrawable)})`;
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = isMaxWord(amountRaw) ? maxAmount(withdrawable) : amountRaw;
 
   const confirmed = await p.confirm({
     message: `Move ${amountInput} USDC from Perps to "${account.name}"'s HyperEVM address? Result is always USDC, regardless of what funded the position. Runs two MPC signing ceremonies.`,
@@ -1204,11 +1218,12 @@ export async function hyperliquidDepositFlow(salt: Salt, walletClient: SaltWalle
     // Non-fatal — first-time accounts have no clearinghouse state yet.
   }
 
-  const amountInput = await p.text({
+  const amountRaw = await p.text({
     message: `Amount of USDC to deposit (available: ${fmtNum(usdcAvailable)}, min ${HL_MIN_DEPOSIT_USDC})`,
-    placeholder: String(Math.floor(usdcAvailable)),
+    placeholder: `${Math.floor(usdcAvailable)}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const n = Number(v);
       if (!Number.isFinite(n)) return "Not a valid amount";
       if (n < HL_MIN_DEPOSIT_USDC) return `Minimum deposit is ${HL_MIN_DEPOSIT_USDC} USDC — anything less is NOT credited`;
@@ -1216,7 +1231,8 @@ export async function hyperliquidDepositFlow(salt: Salt, walletClient: SaltWalle
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = isMaxWord(amountRaw) ? maxAmount(usdcAvailable) : amountRaw;
   const amount = parseUnits(amountInput, 6);
 
   p.note(
@@ -1408,11 +1424,12 @@ async function hlpDepositFlow(salt: Salt, walletClient: SaltWalletClient, vault:
     // APR is just context — don't block the deposit if it fails.
   }
 
-  const amountInput = await p.text({
+  const amountRaw = await p.text({
     message: `Amount of USDC to deposit into HLP (available: ${fmtNum(available)}, min ${VAULT_MIN_DEPOSIT_USD})`,
-    placeholder: String(Math.floor(available)),
+    placeholder: `${Math.floor(available)}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const n = Number(v);
       if (!Number.isFinite(n)) return "Not a valid amount";
       if (n < VAULT_MIN_DEPOSIT_USD) return `Minimum deposit is $${VAULT_MIN_DEPOSIT_USD}`;
@@ -1420,7 +1437,8 @@ async function hlpDepositFlow(salt: Salt, walletClient: SaltWalletClient, vault:
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = isMaxWord(amountRaw) ? maxAmount(available) : amountRaw;
 
   p.note(
     `Deposit ${amountInput} USDC into HLP\n` +
@@ -1473,11 +1491,12 @@ async function hlpWithdrawFlow(salt: Salt, walletClient: SaltWalletClient, vault
     return;
   }
 
-  const amountInput = await p.text({
+  const amountRaw = await p.text({
     message: `Amount of USDC to withdraw from HLP (your equity: ${fmtNum(equity)})`,
-    placeholder: String(Math.floor(equity)),
+    placeholder: `${Math.floor(equity)}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const n = Number(v);
       if (!Number.isFinite(n)) return "Not a valid amount";
       if (n <= 0) return "Amount must be greater than 0";
@@ -1485,7 +1504,8 @@ async function hlpWithdrawFlow(salt: Salt, walletClient: SaltWalletClient, vault
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = isMaxWord(amountRaw) ? maxAmount(equity) : amountRaw;
 
   const confirmed = await p.confirm({ message: `Withdraw ${amountInput} USDC from HLP back to your perp balance?` });
   if (p.isCancel(confirmed) || !confirmed) return;
