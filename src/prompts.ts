@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { styleText } from "node:util";
+import { formatUnits, parseUnits } from "viem";
 import { reportError } from "./errors.js";
 
 export const ACCESS_LEVEL_LABEL: Record<number, string> = {
@@ -22,6 +23,48 @@ export const ACCESS_LEVEL_LABEL: Record<number, string> = {
 export function select<Value>(opts: p.SelectOptions<Value> & { escAction?: string }): Promise<Value | symbol> {
   const { escAction = "go back", ...rest } = opts;
   return p.select({ ...rest, message: `${opts.message}\n${styleText("dim", `Esc: ${escAction}`)}` });
+}
+
+/**
+ * Prompt for a token amount, accepting either a number or the words `max` / `all`
+ * (case-insensitive) to mean the entire available balance. Returns the amount in
+ * the token's smallest unit (wei), or `null` if the user cancels.
+ *
+ * `maxRaw` is the exact spendable balance in wei — already gas-adjusted by the
+ * caller where relevant (e.g. native sends reserve gas). `max`/`all` resolve to
+ * `maxRaw` verbatim, so it's exact to the wei with no formatUnits→parseUnits
+ * round-trip. `note` is appended inside the "(available: …)" hint, e.g.
+ * ", after reserving estimated gas".
+ */
+export async function promptTokenAmount(opts: {
+  verb: string;
+  symbol: string;
+  decimals: number;
+  maxRaw: bigint;
+  note?: string;
+}): Promise<bigint | null> {
+  const { verb, symbol, decimals, maxRaw, note = "" } = opts;
+  const maxFormatted = formatUnits(maxRaw, decimals);
+  const isMax = (v: string) => ["max", "all"].includes(v.trim().toLowerCase());
+  const input = await p.text({
+    message: `Amount of ${symbol} to ${verb} (available: ${maxFormatted}${note})`,
+    placeholder: `${maxFormatted}  —  or "max"`,
+    validate: (v) => {
+      if (!v) return "Amount is required";
+      if (isMax(v)) return undefined;
+      let parsed: bigint;
+      try {
+        parsed = parseUnits(v, decimals);
+      } catch {
+        return 'Not a valid amount (or type "max")';
+      }
+      if (parsed <= 0n) return "Amount must be greater than 0";
+      if (parsed > maxRaw) return `Exceeds available balance (${maxFormatted} ${symbol})`;
+      return undefined;
+    },
+  });
+  if (p.isCancel(input)) return null;
+  return isMax(input) ? maxRaw : parseUnits(input, decimals);
 }
 
 export async function pickOrganisation(salt: Salt, message: string): Promise<string | undefined> {

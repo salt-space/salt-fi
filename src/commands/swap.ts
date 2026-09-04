@@ -1,10 +1,10 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
-import { type Address, createPublicClient, formatUnits, http, parseUnits } from "viem";
+import { type Address, createPublicClient, formatUnits, http } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { fetchTokenPricesUsd, getQuote, type LifiQuote, LIFI_NATIVE_TOKEN, tokenPriceKey } from "../lifi.js";
-import { pickOrganisation, select } from "../prompts.js";
+import { pickOrganisation, promptTokenAmount, select } from "../prompts.js";
 import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import {
   encodeApprove,
@@ -136,7 +136,6 @@ async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): P
   const sellToken = sellable[sellIndex];
   const sellIsNative = sellToken.address.toLowerCase() === NATIVE_ADDRESS;
   const sellParam = sellIsNative ? LIFI_NATIVE_TOKEN : (sellToken.address as Address);
-  const maxSell = formatUnits(sellToken.balance, sellToken.decimals);
 
   // --- buy token (curated list, native, or manual) ---
   const MANUAL = "__manual";
@@ -177,24 +176,14 @@ async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): P
   }
 
   // --- amount + slippage ---
-  const amountInput = await p.text({
-    message: `Amount of ${sellToken.symbol} to swap (available: ${maxSell})`,
-    placeholder: maxSell,
-    validate: (value) => {
-      if (!value) return "Amount is required";
-      let parsed: bigint;
-      try {
-        parsed = parseUnits(value, sellToken.decimals);
-      } catch {
-        return "Not a valid amount";
-      }
-      if (parsed <= 0n) return "Amount must be greater than 0";
-      if (parsed > sellToken.balance) return `Exceeds available balance (${maxSell} ${sellToken.symbol})`;
-      return undefined;
-    },
+  const fromAmount = await promptTokenAmount({
+    verb: "swap",
+    symbol: sellToken.symbol,
+    decimals: sellToken.decimals,
+    maxRaw: sellToken.balance,
   });
-  if (p.isCancel(amountInput)) return;
-  const fromAmount = parseUnits(amountInput, sellToken.decimals);
+  if (fromAmount === null) return;
+  const amountInput = formatUnits(fromAmount, sellToken.decimals);
   if (sellIsNative && fromAmount === sellToken.balance) {
     p.log.warn(`Swapping your entire ${sellToken.symbol} balance — leave a little behind for gas or the tx will fail.`);
   }
@@ -394,7 +383,6 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   if (p.isCancel(sellIndex)) return;
   const sellToken = sellable[sellIndex];
   const sellAddress = sellToken.address as Address;
-  const maxSellFormatted = formatUnits(sellToken.balance, sellToken.decimals);
 
   // --- buy token (curated list for the chain, minus the sell token, or manual) ---
   const MANUAL = "__manual";
@@ -437,24 +425,14 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   }
 
   // --- amount + slippage ---
-  const amountInput = await p.text({
-    message: `Amount of ${sellToken.symbol} to swap (available: ${maxSellFormatted})`,
-    placeholder: maxSellFormatted,
-    validate: (value) => {
-      if (!value) return "Amount is required";
-      let parsed: bigint;
-      try {
-        parsed = parseUnits(value, sellToken.decimals);
-      } catch {
-        return "Not a valid amount";
-      }
-      if (parsed <= 0n) return "Amount must be greater than 0";
-      if (parsed > sellToken.balance) return `Exceeds available balance (${maxSellFormatted} ${sellToken.symbol})`;
-      return undefined;
-    },
+  const amountIn = await promptTokenAmount({
+    verb: "swap",
+    symbol: sellToken.symbol,
+    decimals: sellToken.decimals,
+    maxRaw: sellToken.balance,
   });
-  if (p.isCancel(amountInput)) return;
-  const amountIn = parseUnits(amountInput, sellToken.decimals);
+  if (amountIn === null) return;
+  const amountInput = formatUnits(amountIn, sellToken.decimals);
 
   const slippageInput = await p.text({
     message: "Max slippage % (0.5 suggested for most pairs; raise it for thin/volatile pools)",

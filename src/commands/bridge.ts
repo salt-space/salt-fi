@@ -4,7 +4,7 @@ import { type Address, createPublicClient, formatUnits, http, parseUnits } from 
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError } from "../errors.js";
 import { fetchTokenPricesUsd, getQuote, getStatus, type LifiQuote, LIFI_NATIVE_TOKEN, tokenPriceKey } from "../lifi.js";
-import { pickOrganisation, select } from "../prompts.js";
+import { pickOrganisation, promptTokenAmount, select } from "../prompts.js";
 import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
 import { encodeApprove, ERC20_ABI, KNOWN_TOKENS_BY_CHAIN } from "../uniswap.js";
 import { type PreflightTx, resolvePolicies, submitAndTrack } from "./tx-preflight.js";
@@ -111,7 +111,6 @@ export async function bridgeFlow(salt: Salt, walletClient: SaltWalletClient): Pr
   const fromToken = sendable[sellIndex];
   const fromIsNative = fromToken.address.toLowerCase() === NATIVE_ADDRESS;
   const fromTokenParam = fromIsNative ? LIFI_NATIVE_TOKEN : (fromToken.address as Address);
-  const maxFormatted = formatUnits(fromToken.balance, fromToken.decimals);
 
   // --- destination chain (any active chain other than the source) ---
   const toChainOptions = SEND_NETWORK_IDS.filter((id) => id !== fromChainId);
@@ -157,24 +156,14 @@ export async function bridgeFlow(salt: Salt, walletClient: SaltWalletClient): Pr
   const toIsNative = toTokenParam.toLowerCase() === LIFI_NATIVE_TOKEN.toLowerCase();
 
   // --- amount ---
-  const amountInput = await p.text({
-    message: `Amount of ${fromToken.symbol} to bridge (available: ${maxFormatted})`,
-    placeholder: maxFormatted,
-    validate: (value) => {
-      if (!value) return "Amount is required";
-      let parsed: bigint;
-      try {
-        parsed = parseUnits(value, fromToken.decimals);
-      } catch {
-        return "Not a valid amount";
-      }
-      if (parsed <= 0n) return "Amount must be greater than 0";
-      if (parsed > fromToken.balance) return `Exceeds available balance (${maxFormatted} ${fromToken.symbol})`;
-      return undefined;
-    },
+  const fromAmount = await promptTokenAmount({
+    verb: "bridge",
+    symbol: fromToken.symbol,
+    decimals: fromToken.decimals,
+    maxRaw: fromToken.balance,
   });
-  if (p.isCancel(amountInput)) return;
-  const fromAmount = parseUnits(amountInput, fromToken.decimals);
+  if (fromAmount === null) return;
+  const amountInput = formatUnits(fromAmount, fromToken.decimals);
   if (fromIsNative && fromAmount === fromToken.balance) {
     p.log.warn(
       `You're bridging your entire ${fromToken.symbol} balance — the source transaction still needs a little ${fromToken.symbol} for gas, so leave a bit behind or this will fail.`,
