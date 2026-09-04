@@ -485,6 +485,38 @@ function encodeErc20Transfer(to: Address, amount: bigint): `0x${string}` {
   return encodeFunctionData({ abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [to, amount] });
 }
 
+/**
+ * Best-effort spendable HyperEVM balance of `asset`, as a human-decimal number, or `undefined`
+ * when it can't be read (so the caller falls back to a plain amount prompt with no "max").
+ *
+ * - **HYPE** is the native gas token, so a plain `getBalance` minus a small gas reserve — a "max"
+ *   transfer still has to pay its own HyperEVM gas in HYPE, so we hold a little back (like the
+ *   Send flow does for native assets).
+ * - **USDC**-on-HyperEVM's `balanceOf` reverts on `eth_call` for every caller (a HyperCore-linked
+ *   token quirk, see {@link viewBalancesFlow}), so it comes back `undefined` — no reliable "max".
+ */
+async function hyperEvmAvailable(asset: SupportedFundingAsset, address: Address): Promise<number | undefined> {
+  const client = hyperEvmPublicClient();
+  try {
+    if (asset === "HYPE") {
+      const [bal, gasPrice] = await Promise.all([client.getBalance({ address }), client.getGasPrice().catch(() => 0n)]);
+      // Reserve headroom for the transfer's own gas (a native send is ~21k; pad it generously).
+      const reserve = gasPrice * 100_000n;
+      const spendable = bal > reserve ? bal - reserve : 0n;
+      return Number(formatUnits(spendable, FUNDING_ASSET_DECIMALS.HYPE));
+    }
+    const bal = await client.readContract({
+      address: USDC_HYPEREVM_ADDRESS,
+      abi: parseAbi(["function balanceOf(address) view returns (uint256)"]),
+      functionName: "balanceOf",
+      args: [address],
+    });
+    return Number(formatUnits(bal, FUNDING_ASSET_DECIMALS.USDC));
+  } catch {
+    return undefined; // HYPE RPC hiccup, or USDC's balanceOf reverting — caller prompts without "max"
+  }
+}
+
 /** HyperEVM -> HyperCore Spot: a plain EVM transfer to Hyperliquid's system address, signed via Salt's normal transaction ceremony (no Hyperliquid-specific signing scheme involved). Returns the broadcast tx hash. */
 export async function transferHyperEvmToSpot(
   salt: Salt,
@@ -564,19 +596,28 @@ async function fundTradingFlow(salt: Salt, walletClient: SaltWalletClient): Prom
   if (p.isCancel(asset)) return;
 
   const decimals = FUNDING_ASSET_DECIMALS[asset];
-  const amountInput = await p.text({
-    message: `Amount of ${asset} to fund trading with`,
+  // Best-effort HyperEVM balance so we can offer "max" + bound the amount. HYPE reads cleanly
+  // (native, gas-reserved); USDC-on-HyperEVM's balanceOf reverts, so this is undefined → the
+  // prompt just takes a plain amount with no "max", exactly as before.
+  const available = await hyperEvmAvailable(asset, accountAddress);
+  const canMax = available !== undefined && available > 0;
+  const amountRaw = await p.text({
+    message: `Amount of ${asset} to fund trading with${available !== undefined ? ` (available: ${fmtNum(available)})` : ""}`,
+    placeholder: canMax ? `${maxAmount(available)}  —  or "max"` : undefined,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (canMax && isMaxWord(v)) return undefined;
       try {
         if (parseUnits(v, decimals) <= 0n) return "Amount must be greater than 0";
       } catch {
         return "Not a valid amount";
       }
+      if (available !== undefined && Number(v) > available) return `Exceeds available (${fmtNum(available)} ${asset})`;
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = canMax && isMaxWord(amountRaw) ? maxAmount(available) : amountRaw;
   const amount = parseUnits(amountInput, decimals);
 
   // Check the sell will clear Hyperliquid's spot minimum-order-value rule *before* moving
@@ -993,19 +1034,28 @@ async function rawDepositFlow(salt: Salt, walletClient: SaltWalletClient): Promi
   if (p.isCancel(asset)) return;
 
   const decimals = FUNDING_ASSET_DECIMALS[asset];
-  const amountInput = await p.text({
-    message: `Amount of ${asset} to transfer`,
+  // Best-effort HyperEVM balance so we can offer "max" + bound the amount. HYPE reads cleanly
+  // (native, gas-reserved); USDC-on-HyperEVM's balanceOf reverts, so this is undefined → the
+  // prompt just takes a plain amount with no "max", exactly as before.
+  const available = await hyperEvmAvailable(asset, accountAddress);
+  const canMax = available !== undefined && available > 0;
+  const amountRaw = await p.text({
+    message: `Amount of ${asset} to transfer${available !== undefined ? ` (available: ${fmtNum(available)})` : ""}`,
+    placeholder: canMax ? `${maxAmount(available)}  —  or "max"` : undefined,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (canMax && isMaxWord(v)) return undefined;
       try {
         if (parseUnits(v, decimals) <= 0n) return "Amount must be greater than 0";
       } catch {
         return "Not a valid amount";
       }
+      if (available !== undefined && Number(v) > available) return `Exceeds available (${fmtNum(available)} ${asset})`;
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = canMax && isMaxWord(amountRaw) ? maxAmount(available) : amountRaw;
   const amount = parseUnits(amountInput, decimals);
 
   const confirmed = await p.confirm({
@@ -1052,17 +1102,21 @@ async function rawWithdrawFlow(salt: Salt, walletClient: SaltWalletClient): Prom
     return;
   }
 
-  const amountInput = await p.text({
-    message: `Amount of ${asset} to transfer to HyperEVM`,
+  const amountRaw = await p.text({
+    message: `Amount of ${asset} to transfer to HyperEVM (available: ${available})`,
+    placeholder: `${available}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const parsed = Number.parseFloat(v);
       if (!Number.isFinite(parsed) || parsed <= 0) return "Enter a positive number";
       if (parsed > Number.parseFloat(available)) return `Exceeds available balance (${available} ${asset})`;
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  // "max" uses the reported spot total verbatim (exact string from the API, no float reformat).
+  const amountInput = isMaxWord(amountRaw) ? available : amountRaw;
 
   const confirmed = await p.confirm({
     message: `Transfer ${amountInput} ${asset} from HyperCore Spot back to "${account.name}"'s HyperEVM address? This runs an MPC signing ceremony.`,
@@ -1115,18 +1169,20 @@ async function rawUsdClassFlow(salt: Salt, walletClient: SaltWalletClient, toPer
 
   // Floor to 6 decimals so the request never exceeds Hyperliquid's coarser USD balance accounting.
   const maxMovable = Math.floor(available * 1e6) / 1e6;
-  const amountInput = await p.text({
+  const amountRaw = await p.text({
     message: `Amount of USDC to move ${toPerp ? "Spot -> Perps" : "Perps -> Spot"} (max ${fmtNum(maxMovable)})`,
-    placeholder: String(maxMovable),
+    placeholder: `${maxMovable}  —  or "max"`,
     validate: (v) => {
       if (!v) return "Amount is required";
+      if (isMaxWord(v)) return undefined;
       const parsed = Number.parseFloat(v);
       if (!Number.isFinite(parsed) || parsed <= 0) return "Enter a positive number";
       if (parsed > available) return `Exceeds available (${fmtNum(available)} USDC)`;
       return undefined;
     },
   });
-  if (p.isCancel(amountInput)) return;
+  if (p.isCancel(amountRaw)) return;
+  const amountInput = isMaxWord(amountRaw) ? String(maxMovable) : amountRaw;
   const amount = Math.floor(Number.parseFloat(amountInput) * 1e6) / 1e6;
 
   const confirmed = await p.confirm({
