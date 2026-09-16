@@ -94,7 +94,7 @@ export async function activateRoboFlow(
   // that same OTP — so activating before the host has connected would leave you
   // unable to (re)provision it. Guard against that; the getting-started wizard
   // only reaches here after robos are online, so this bites only the standalone flow.
-  if (!host.provisioned) {
+  if (host.signers.length === 0) {
     s.stop("Robo host hasn't connected yet");
     p.log.warn(
       "This robo host hasn't connected yet — and activation consumes the one-time\n" +
