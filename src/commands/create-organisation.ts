@@ -137,7 +137,7 @@ export async function setUpRoboHost(
   }
   existing.stop(host ? "Found an existing robo host" : "No robo host registered yet");
 
-  if (host?.provisioned) {
+  if ((host?.signers.length ?? 0) > 0) {
     p.log.info(
       "This organisation's Robo Guardians are already provisioned. Re-running setup would only " +
         'be useful if you need to re-host them — check "Robo Guardians → Check robo guardians" for status.',
