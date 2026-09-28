@@ -2,8 +2,6 @@
 
 A mini terminal app to get started with the Salt SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
 
-Salt is in Beta — treat this project as subject to change.
-
 ## Important notice
 
 **salt-fi is an independent open-source project maintained by its author in a personal capacity. It is not an official Salt product and is not part of Salt's supported product offering.**
