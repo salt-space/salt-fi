@@ -1,8 +1,8 @@
 import * as p from "@clack/prompts";
-import type { Policy, Salt } from "salt-sdk";
+import type { Policy, PolicyCheck, Salt } from "salt-sdk";
 import { type Address, type PublicClient } from "viem";
 import { formatSaltError, txHashFromError } from "../errors.js";
-import { policyCheckGasFields, POLICY_TYPE_LABEL } from "../policies.js";
+import { explainBreach, explainNotEvaluated, policyCheckGasFields, policyCheckParams, policyHeadline } from "../policies.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 /**
@@ -77,9 +77,26 @@ export async function submitAndTrack(salt: Salt, params: SubmitParams, label: st
 export interface PreflightTx {
   label: string;
   to: Address;
+  /** Native value sent with the call, in wei — what native per-transaction limits read. */
+  value: bigint;
   data: `0x${string}`;
   whitelistNickname: string;
 }
+
+/** The fixed context of a pre-check: who proposes, from which account, on which chain. */
+export interface PreflightContext {
+  accountId: string;
+  /** The Salt account's own address — the `from` of every transaction it submits. */
+  accountAddress: string;
+  /** The signer proposing the transactions (the connected wallet). */
+  selfAddress: string;
+  chainId: string;
+  isOwner: boolean;
+  /** User-facing noun for the action ("swap", "bridge"), woven into the prompts. */
+  operation: string;
+}
+
+type CheckResult = { tx: PreflightTx; check: PolicyCheck };
 
 /**
  * Outcome of the policy pre-check:
@@ -111,73 +128,111 @@ async function promptProceedAnyway(operation: string): Promise<PolicyDecision> {
   return !p.isCancel(anyway) && anyway === true ? "proceed" : "abort";
 }
 
+const indent = (text: string, spaces: number): string =>
+  text
+    .split("\n")
+    .map((line) => " ".repeat(spaces) + line)
+    .join("\n");
+
+/**
+ * Every policy that bears on this operation: those evaluated, marked pass/fail,
+ * then those on this chain that weren't — and so don't constrain it, which is
+ * easy to assume they do (a token limit next to a swap of that token, say).
+ */
+function showPolicySummary(ctx: PreflightContext, results: CheckResult[], accountPolicies: Policy[] | undefined): void {
+  const rejectedIds = new Set(results.flatMap((r) => r.check.rejectedPolicies.map((pol) => pol.id)));
+  const evaluated = dedupeById(results.flatMap((r) => r.check.networkPolicies));
+  const evaluatedIds = new Set(evaluated.map((pol) => pol.id));
+  const unevaluated = (accountPolicies ?? []).filter(
+    (pol) => (pol.chain === "*" || pol.chain === ctx.chainId) && !evaluatedIds.has(pol.id),
+  );
+  const lines = [
+    ...evaluated.map((pol) => `${rejectedIds.has(pol.id) ? "✗" : "✓"} ${policyHeadline(pol)}`),
+    ...unevaluated.map(
+      (pol) => `– ${policyHeadline(pol)} — doesn't apply:\n${indent(explainNotEvaluated(pol, ctx.operation), 4)}`,
+    ),
+  ];
+  if (lines.length > 0) p.note(lines.join("\n"), `Account policies for this ${ctx.operation}`);
+}
+
+/**
+ * Each rejected policy, with why each transaction breaches it — worked out
+ * locally from the policy's params where possible, so the report says "amount
+ * must be ≤ X; this call has Y" rather than only naming the policy.
+ */
+function breachReport(ctx: PreflightContext, results: CheckResult[]): string {
+  const names = new Map(results.map(({ tx }) => [tx.to.toLowerCase(), tx.whitelistNickname]));
+  names.set(ctx.selfAddress.toLowerCase(), "you");
+  const resolveLabel = (address: string) => names.get(address.toLowerCase());
+
+  return dedupeById(results.flatMap((r) => r.check.rejectedPolicies))
+    .map((pol) => {
+      const reasons = results
+        .filter(({ check }) => check.rejectedPolicies.some((rejected) => rejected.id === pol.id))
+        .flatMap(({ tx }) =>
+          explainBreach(
+            pol,
+            { chainId: ctx.chainId, to: tx.to, value: tx.value, data: tx.data },
+            { proposer: ctx.selfAddress, resolveLabel },
+          ).map((why) => `${tx.label}: ${why}`),
+        );
+      return [`  • ${policyHeadline(pol)}`, ...reasons.map((why) => indent(why, 6))].join("\n");
+    })
+    .join("\n");
+}
+
 /**
  * Run Salt's policy check against each transaction a flow will submit and
- * surface the results. Salt evaluates each call's `to` against the account's
- * policies, so the common blocker is an allowed-recipients whitelist that
- * doesn't include the contract being called (e.g. the swap router or the bridge
- * contract, and/or a sell token being approved). An owner can add the missing
- * addresses inline; anyone else can proceed and see it fail.
+ * surface the results: which policies pass or fail, why a failure fails, and
+ * which of the account's policies on this chain don't constrain the operation
+ * at all. The checks are built exactly as `submitTx` builds the transaction
+ * record, so they evaluate what the Robo Guardians will.
  *
- * `operation` is the user-facing noun for the action ("swap", "bridge") woven
- * into the prompts. See {@link PolicyDecision} for the outcomes.
+ * The common blocker is an allowed-recipients whitelist that doesn't include
+ * the contract being called (e.g. the swap router or the bridge contract,
+ * and/or a sell token being approved). An owner can add the missing addresses
+ * inline; anyone else can proceed and see it fail. See {@link PolicyDecision}
+ * for the outcomes.
  */
-export async function resolvePolicies(
-  salt: Salt,
-  accountId: string,
-  selfAddress: string,
-  chainId: string,
-  isOwner: boolean,
-  txs: PreflightTx[],
-  operation: string,
-): Promise<PolicyDecision> {
-  const runChecks = async () => {
-    const nonce = await salt.getAccountNonce(accountId, Number(chainId));
-    const gasFields = await policyCheckGasFields(salt, Number(chainId));
-    const out: { tx: PreflightTx; check: Awaited<ReturnType<Salt["runPoliciesCheck"]>> }[] = [];
-    for (const tx of txs) {
-      const check = await salt.runPoliciesCheck(accountId, {
-        nonce,
-        amount: "0",
-        from: selfAddress,
-        to: tx.to,
-        network: chainId,
-        data: tx.data,
-        ...gasFields,
-      });
-      out.push({ tx, check });
+export async function resolvePolicies(salt: Salt, ctx: PreflightContext, txs: PreflightTx[]): Promise<PolicyDecision> {
+  const { accountId, chainId, isOwner, operation } = ctx;
+  const runChecks = async (): Promise<CheckResult[]> => {
+    const [nonce, gasFields] = await Promise.all([
+      salt.getAccountNonce(accountId, Number(chainId)),
+      policyCheckGasFields(salt, Number(chainId)),
+    ]);
+    const out: CheckResult[] = [];
+    // Each transaction is submitted once the one before it lands, so it takes the next nonce.
+    for (const [i, tx] of txs.entries()) {
+      const call = { chainId, to: tx.to, value: tx.value, data: tx.data };
+      out.push({ tx, check: await salt.runPoliciesCheck(accountId, policyCheckParams(call, ctx.accountAddress, nonce + i, gasFields)) });
     }
     return out;
   };
 
-  let results;
+  let results: CheckResult[];
+  let accountPolicies: Policy[] | undefined;
   try {
-    results = await runChecks();
+    [results, accountPolicies] = await Promise.all([
+      runChecks(),
+      // Only needed to name the policies that *don't* apply — not worth failing the check over.
+      salt.listAccountPolicies(accountId).catch(() => undefined),
+    ]);
   } catch (err) {
     p.log.warn(`Couldn't check account policies (${(err as Error).message}). Proceeding without a policy check.`);
     return "clear";
   }
 
-  // Surface every policy that applies to this operation, with a pass/fail mark.
-  const rejectedIds = new Set(results.flatMap((r) => r.check.rejectedPolicies.map((pol) => pol.id)));
-  const applicable = dedupeById(results.flatMap((r) => r.check.networkPolicies));
-  if (applicable.length > 0) {
-    p.note(
-      applicable.map((pol) => `${rejectedIds.has(pol.id) ? "✗" : "✓"} ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
-      `Account policies that apply to this ${operation}`,
-    );
-  }
+  showPolicySummary(ctx, results, accountPolicies);
 
   const rejected = dedupeById(results.flatMap((r) => r.check.rejectedPolicies));
   if (rejected.length === 0) return "clear";
 
   // Blockers other than the whitelist can't be auto-resolved here.
-  const nonWhitelist = rejected.filter((pol) => pol.type !== "allowed_recipients");
-  if (nonWhitelist.length > 0) {
+  if (rejected.some((pol) => pol.type !== "allowed_recipients")) {
     p.log.error(
-      `This ${operation} is blocked by policies that can't be resolved here:\n` +
-        nonWhitelist.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n") +
-        '\nAn owner can adjust these via "Manage policies".',
+      `This ${operation} is blocked by account policy:\n${breachReport(ctx, results)}\n` +
+        'An owner can adjust these via "Manage policies".',
     );
     return promptProceedAnyway(operation);
   }
@@ -237,12 +292,8 @@ export async function resolvePolicies(
   // Re-check to confirm the operation is now allowed (e.g. in case another policy also applies).
   try {
     const recheck = await runChecks();
-    const stillRejected = dedupeById(recheck.flatMap((r) => r.check.rejectedPolicies));
-    if (stillRejected.length > 0) {
-      p.log.error(
-        "Still blocked after the whitelist update:\n" +
-          stillRejected.map((pol) => `  • ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
-      );
+    if (recheck.some((r) => r.check.rejectedPolicies.length > 0)) {
+      p.log.error(`Still blocked after the whitelist update:\n${breachReport(ctx, recheck)}`);
       return promptProceedAnyway(operation);
     }
   } catch {

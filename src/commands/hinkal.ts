@@ -866,13 +866,24 @@ async function depositFlow(salt: Salt, walletClient: SaltWalletClient): Promise<
 
   const txs: PreflightTx[] = [
     ...(approveData
-      ? [{ label: `Approve ${asset.symbol}`, to: token, data: approveData, whitelistNickname: `${asset.symbol} token` }]
+      ? [{ label: `Approve ${asset.symbol}`, to: token, value: 0n, data: approveData, whitelistNickname: `${asset.symbol} token` }]
       : []),
-    { label: "Deposit", to: call.to, data: call.data, whitelistNickname: "Hinkal pool" },
+    { label: "Deposit", to: call.to, value: call.value, data: call.data, whitelistNickname: "Hinkal pool" },
   ];
   await warnIfWideningWhitelist(salt, ctx, call.to);
 
-  const decision = await resolvePolicies(salt, ctx.accountId, ctx.selfAddress, String(ctx.chainId), ctx.isOwner, txs, "deposit");
+  const decision = await resolvePolicies(
+    salt,
+    {
+      accountId: ctx.accountId,
+      accountAddress: ctx.accountAddress,
+      selfAddress: ctx.selfAddress,
+      chainId: String(ctx.chainId),
+      isOwner: ctx.isOwner,
+      operation: "deposit",
+    },
+    txs,
+  );
   if (decision === "abort") return;
   if (decision === "clear") {
     const confirmed = await p.confirm({ message: "Send this deposit?" });

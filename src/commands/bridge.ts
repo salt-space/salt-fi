@@ -282,12 +282,16 @@ export async function bridgeFlow(salt: Salt, walletClient: SaltWalletClient): Pr
 
   const txs: PreflightTx[] = [
     ...(approveData
-      ? [{ label: `Approve ${fromToken.symbol}`, to: fromToken.address as Address, data: approveData, whitelistNickname: `${fromToken.symbol} token` }]
+      ? [{ label: `Approve ${fromToken.symbol}`, to: fromToken.address as Address, value: 0n, data: approveData, whitelistNickname: `${fromToken.symbol} token` }]
       : []),
-    { label: "Bridge", to: bridgeTo, data: bridgeData, whitelistNickname: `LI.FI (${quote.toolDetails?.name ?? quote.tool})` },
+    { label: "Bridge", to: bridgeTo, value: bridgeValue, data: bridgeData, whitelistNickname: `LI.FI (${quote.toolDetails?.name ?? quote.tool})` },
   ];
 
-  const decision = await resolvePolicies(salt, accountId, selfAddress, fromChainId, isOwner, txs, "bridge");
+  const decision = await resolvePolicies(
+    salt,
+    { accountId, accountAddress, selfAddress, chainId: fromChainId, isOwner, operation: "bridge" },
+    txs,
+  );
   if (decision === "abort") return;
   if (decision === "clear") {
     const confirmed = await p.confirm({ message: "Execute this bridge?" });
