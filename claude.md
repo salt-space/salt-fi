@@ -1,8 +1,7 @@
 # salt-fi
 
-A terminal app for getting started with the Salt SDK. Salt is in Beta — treat
-this project as subject to change, and verify against the current docs and
-package types before relying on anything below long-term.
+A terminal app for getting started with the Salt SDK. Verify against the
+current docs and package types before relying on anything below long-term.
 
 ## The SDK
 
@@ -11,7 +10,7 @@ package types before relying on anything below long-term.
 - Docs: https://docs.salt.space
 - API reference: https://developer.salt.space/sdk/
 - When the published docs and the installed package's type definitions
-  disagree, trust the types — this is beta software and the docs can lag. Read
+  disagree, trust the types — the docs can lag. Read
   `node_modules/salt-sdk` directly when in doubt.
 - Requires `"type": "module"` in package.json — the SDK ships top-level `await`
   in an ESM file, which breaks under CJS-default Node resolution.
