@@ -1,22 +1,37 @@
 import * as p from "@clack/prompts";
-import { DuplicatePolicyError, type Policy, type PolicyType, type Salt } from "salt-sdk";
-import { parseUnits } from "viem";
+import { type ContractParamRestriction, DuplicatePolicyError, type Policy, type PolicyType, type Salt } from "salt-sdk";
+import { type Address, createPublicClient, erc20Abi, getAddress, http, parseUnits } from "viem";
+import { CHAIN_BY_ID, rpcUrl } from "../chains.js";
+import {
+  auditRestrictions,
+  findConflicts,
+  type FunctionParam,
+  normalizeValue,
+  OPERATOR_LABEL,
+  operatorsFor,
+  type ParamKind,
+  paramLabel,
+  parseFunctionSignature,
+  RESTRICTION_PRESETS,
+  type RestrictionPreset,
+} from "../contract-restrictions.js";
 import { formatSaltError } from "../errors.js";
 import {
   ADDRESS_PATTERN,
-  CONTRACT_PRESETS,
   CREATABLE_POLICY_TYPES,
   NATIVE_ADDRESS,
-  POLICY_OPERATORS,
   POLICY_TYPE_LABEL,
   RECIPIENT_TYPES,
   type ResolveLabel,
   buildResolveLabel,
   chainLabel,
+  describeEntry,
   describePolicy,
   policyChainOptions,
+  policyEntryKey,
 } from "../policies.js";
 import { pickOrganisation, select } from "../prompts.js";
+import { KNOWN_TOKENS_BY_CHAIN } from "../uniswap.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 type CreatableType = Exclude<PolicyType, "nominated_approvers">;
@@ -24,13 +39,7 @@ type RecipientEntry = { address: string; nickname?: string };
 /** A pickable signer for a denied-proposers policy: the account's human co-signers. */
 type ProposerOption = { address: string; label: string; hint?: string };
 type LimitEntry = { address: string; amount: string };
-type Restriction = {
-  contractAddress: string;
-  functionSignature: string;
-  paramIndex: number;
-  operator: (typeof POLICY_OPERATORS)[number]["value"];
-  value: string;
-};
+type Restriction = ContractParamRestriction;
 
 const CANCEL = Symbol("cancel");
 /** A builder's first step was backed out of — return to the previous add step. */
@@ -182,9 +191,175 @@ async function buildLimits(
   }
 }
 
+const OTHER_TOKEN = "__other";
+
+/**
+ * Pick a token contract: the chain's curated tokens when the policy is scoped
+ * to a single chain, otherwise (or for anything else) a pasted address.
+ */
+async function promptTokenAddress(chain: string | undefined, message: string): Promise<Address | typeof CANCEL> {
+  const known = chain && chain !== "*" ? (KNOWN_TOKENS_BY_CHAIN[chain] ?? []) : [];
+  if (known.length > 0) {
+    const choice = await select({
+      message,
+      options: [
+        ...known.map((token) => ({ value: token.address as string, label: token.symbol, hint: token.address })),
+        { value: OTHER_TOKEN, label: "Another token — enter its address" },
+      ],
+    });
+    if (p.isCancel(choice)) return CANCEL;
+    if (choice !== OTHER_TOKEN) return getAddress(choice);
+  }
+  const address = await p.text({ message: known.length > 0 ? "Token contract address" : message, validate: addressValidator });
+  return p.isCancel(address) ? CANCEL : getAddress(address);
+}
+
+/**
+ * A token's decimals — read on-chain when the policy is scoped to one chain,
+ * otherwise (or if the read fails) asked for.
+ */
+async function promptTokenDecimals(chain: string | undefined, token: Address): Promise<number | typeof CANCEL> {
+  const viemChain = chain && chain !== "*" ? CHAIN_BY_ID[chain] : undefined;
+  if (chain && viemChain) {
+    const s = p.spinner();
+    s.start("Reading the token's decimals");
+    try {
+      const client = createPublicClient({ chain: viemChain, transport: http(rpcUrl(chain), { timeout: 8_000, retryCount: 1 }) });
+      const decimals = await client.readContract({ address: token, abi: erc20Abi, functionName: "decimals" });
+      s.stop(`The token has ${decimals} decimals`);
+      return decimals;
+    } catch {
+      s.stop("Couldn't read the token's decimals — enter them below");
+    }
+  }
+  const dec = await p.text({
+    message: "Token decimals",
+    defaultValue: "18",
+    placeholder: "18",
+    validate: (v) => (v && !/^\d+$/.test(v) ? "Enter a whole number" : undefined),
+  });
+  return p.isCancel(dec) ? CANCEL : Number(dec || "18");
+}
+
+const VALUE_PLACEHOLDER: Record<ParamKind, string> = {
+  uint: "a whole number in base units, e.g. 1000000",
+  int: "a whole number, e.g. -5",
+  address: "0x1234567890123456789012345678901234567890",
+  bool: "true or false",
+  bytes: "0x-prefixed hex",
+  string: "exact text (compared case-insensitively)",
+};
+
+/**
+ * Collect the value an argument is compared against, validated for its
+ * Solidity type — the API accepts a malformed value, and one that fails to
+ * parse on the server blocks every call the restriction matches. Returns the
+ * value normalised for saving.
+ */
+async function promptValue(param: FunctionParam, message: string, decimals?: number): Promise<string | typeof CANCEL> {
+  const input = await p.text({
+    message,
+    placeholder: decimals !== undefined ? "e.g. 250" : VALUE_PLACEHOLDER[param.kind ?? "string"],
+    validate: (v) => {
+      const checked = normalizeValue(param, v ?? "", { decimals });
+      return checked.ok ? undefined : checked.error;
+    },
+  });
+  if (p.isCancel(input)) return CANCEL;
+  const checked = normalizeValue(param, input ?? "", { decimals });
+  if (!checked.ok) return CANCEL; // unreachable: validate already passed
+  if (decimals !== undefined) p.log.step(`${input.trim()} tokens = ${checked.value} base units`);
+  return checked.value;
+}
+
+/** A restriction from a template: pick the token, enter the value. */
+async function buildPresetRestriction(preset: RestrictionPreset, chain: string | undefined): Promise<Restriction | typeof CANCEL> {
+  const fn = parseFunctionSignature(preset.functionSignature);
+  if (preset.note) p.log.info(preset.note);
+
+  const contractAddress = await promptTokenAddress(chain, "Which token?");
+  if (contractAddress === CANCEL) return CANCEL;
+  let decimals: number | undefined;
+  if (preset.tokenAmount) {
+    const read = await promptTokenDecimals(chain, contractAddress);
+    if (read === CANCEL) return CANCEL;
+    decimals = read;
+  }
+  const value = await promptValue(
+    fn.params[preset.paramIndex],
+    decimals !== undefined ? `${preset.valuePrompt}, in whole tokens` : preset.valuePrompt,
+    decimals,
+  );
+  if (value === CANCEL) return CANCEL;
+  return { contractAddress, functionSignature: fn.signature, paramIndex: preset.paramIndex, operator: preset.operator, value };
+}
+
+/**
+ * A restriction on any function: the signature is parsed up front, the
+ * argument is picked from its parameters, and only operators and values the
+ * engine can compare for that argument's type are offered. Returns undefined
+ * when the function has nothing that can be restricted.
+ */
+async function buildCustomRestriction(): Promise<Restriction | typeof CANCEL | undefined> {
+  const contractAddress = await p.text({ message: "Contract address", validate: addressValidator });
+  if (p.isCancel(contractAddress)) return CANCEL;
+
+  const signature = await p.text({
+    message: "Function signature",
+    placeholder: "approve(address spender, uint256 amount)",
+    validate: (v) => {
+      try {
+        parseFunctionSignature(v ?? "");
+        return undefined;
+      } catch (err) {
+        return (err as Error).message;
+      }
+    },
+  });
+  if (p.isCancel(signature)) return CANCEL;
+  const fn = parseFunctionSignature(signature);
+
+  const comparable = fn.params.filter((param) => param.kind);
+  if (comparable.length === 0) {
+    p.log.warn(
+      fn.params.length === 0
+        ? `${fn.signature} takes no arguments — there's nothing to restrict.`
+        : `None of ${fn.signature}'s arguments can be restricted: Salt compares top-level numbers, addresses, bools,\n` +
+            "bytes and strings, not tuples or arrays.",
+    );
+    return undefined;
+  }
+  // Show what will actually be matched, so it can be checked against the contract's ABI or an explorer.
+  p.log.info(`Matches calls to ${fn.signature} — selector ${fn.selector}`);
+
+  const paramIndex = await select({
+    message: "Which argument?",
+    initialValue: comparable[0].index,
+    options: fn.params.map((param) => ({
+      value: param.index,
+      label: `${paramLabel(param)} — ${param.type}`,
+      hint: param.kind ? undefined : "tuples and arrays can't be compared",
+      disabled: !param.kind,
+    })),
+  });
+  if (p.isCancel(paramIndex)) return CANCEL;
+  const param = fn.params[paramIndex];
+
+  const operator = await select({
+    message: "Operator",
+    options: operatorsFor(param.kind!).map((op) => ({ value: op, label: OPERATOR_LABEL[op] })),
+  });
+  if (p.isCancel(operator)) return CANCEL;
+
+  const value = await promptValue(param, `Value ${paramLabel(param)} is compared against`);
+  if (value === CANCEL) return CANCEL;
+  return { contractAddress: getAddress(contractAddress), functionSignature: fn.signature, paramIndex, operator, value };
+}
+
 async function buildRestrictions(
   existing: Restriction[] = [],
   allowBack = false,
+  chain?: string,
 ): Promise<Restriction[] | typeof CANCEL | typeof GO_BACK> {
   const entries = [...existing];
   while (true) {
@@ -197,60 +372,40 @@ async function buildRestrictions(
     const presetChoice = await select({
       message: "Restriction template",
       options: [
-        ...CONTRACT_PRESETS.map((preset, i) => ({ value: String(i), label: preset.label })),
-        { value: "custom", label: "Custom — enter everything manually" },
+        ...RESTRICTION_PRESETS.map((preset, i) => ({ value: String(i), label: preset.label, hint: preset.hint })),
+        { value: "custom", label: "Custom — any function and argument" },
         ...(allowBack && entries.length === 0 ? [{ value: "__back", label: "← Back" }] : []),
       ],
     });
     if (p.isCancel(presetChoice)) return CANCEL;
     if (presetChoice === "__back") return GO_BACK;
 
-    const contractAddress = await p.text({ message: "Contract address", validate: addressValidator });
-    if (p.isCancel(contractAddress)) return CANCEL;
+    const built =
+      presetChoice === "custom"
+        ? await buildCustomRestriction()
+        : await buildPresetRestriction(RESTRICTION_PRESETS[Number(presetChoice)], chain);
+    if (built === CANCEL) return CANCEL;
+    if (built === undefined) continue;
 
-    if (presetChoice !== "custom") {
-      const preset = CONTRACT_PRESETS[Number(presetChoice)];
-      const value = await p.text({
-        message: preset.valuePrompt,
-        validate: (v) => (!v || v.trim() === "" ? "Required" : undefined),
-      });
-      if (p.isCancel(value)) return CANCEL;
-      entries.push({
-        contractAddress,
-        functionSignature: preset.functionSignature,
-        paramIndex: preset.paramIndex,
-        operator: preset.operator,
-        value,
-      });
-      continue;
+    // Restrictions are ANDed, so one that can't hold alongside the others
+    // freezes the function outright. Allow it (freezing can be the intent),
+    // but only knowingly.
+    const before = new Set(findConflicts(entries));
+    const conflicts = findConflicts([...entries, built]).filter((c) => !before.has(c));
+    if (conflicts.length > 0) {
+      p.log.warn(conflicts.join("\n\n"));
+      const keep = await p.confirm({ message: "Add this restriction anyway?", initialValue: false });
+      if (p.isCancel(keep)) return CANCEL;
+      if (!keep) continue;
     }
-
-    const functionSignature = await p.text({
-      message: "Function signature",
-      placeholder: "transfer(address,uint256)",
-      validate: (v) => (!v || !v.includes("(") ? "Enter a signature like transfer(address,uint256)" : undefined),
-    });
-    if (p.isCancel(functionSignature)) return CANCEL;
-    const paramIndex = await p.text({
-      message: "Zero-based index of the argument to restrict",
-      placeholder: "0",
-      validate: (v) => (!v || !/^\d+$/.test(v) ? "Enter a whole number" : undefined),
-    });
-    if (p.isCancel(paramIndex)) return CANCEL;
-    const operator = await select({ message: "Operator", options: [...POLICY_OPERATORS] });
-    if (p.isCancel(operator)) return CANCEL;
-    const value = await p.text({
-      message: "Value the argument is compared against",
-      validate: (v) => (!v || v.trim() === "" ? "Required" : undefined),
-    });
-    if (p.isCancel(value)) return CANCEL;
-    entries.push({ contractAddress, functionSignature, paramIndex: Number(paramIndex), operator, value });
+    entries.push(built);
   }
 }
 
 /** Build the full params object for a given policy type: object, CANCEL, or GO_BACK. */
 async function buildParams(
   type: CreatableType,
+  chain: string,
   proposerOptions: ProposerOption[] = [],
 ): Promise<Record<string, unknown> | typeof CANCEL | typeof GO_BACK> {
   // Denied proposers are always the account's own co-signers, so offer them as
@@ -268,7 +423,7 @@ async function buildParams(
     const limits = await buildLimits([], true);
     return limits === CANCEL || limits === GO_BACK ? limits : { limits };
   }
-  const restrictions = await buildRestrictions([], true);
+  const restrictions = await buildRestrictions([], true, chain);
   return restrictions === CANCEL || restrictions === GO_BACK ? restrictions : { restrictions };
 }
 
@@ -319,7 +474,7 @@ export async function addPolicy(
       }
     }
 
-    const built = await buildParams(type, proposerOptions ?? []);
+    const built = await buildParams(type, chain, proposerOptions ?? []);
     if (built === GO_BACK) {
       chain = undefined; // back to chain selection
       continue;
@@ -359,20 +514,14 @@ export async function addPolicy(
  */
 async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveLabel): Promise<void> {
   const params = policy.params as Record<string, unknown>;
-  const key = Array.isArray(params.recipients)
-    ? "recipients"
-    : Array.isArray(params.limits)
-      ? "limits"
-      : "restrictions";
+  const key = policyEntryKey(policy.params);
+  // Nominated approvers aren't enforced by Salt yet (the picker leaves them out); nothing else lacks entries.
+  if (key === undefined || key === "approvers") {
+    p.log.info("This policy has no editable entries — delete it instead.");
+    return;
+  }
 
-  const labelFor = (entry: Record<string, unknown>): string => {
-    if (key === "recipients") {
-      const label = (entry.nickname as string | undefined) || resolveLabel(entry.address as string);
-      return `${label ? `${label} — ` : ""}${entry.address}`;
-    }
-    if (key === "limits") return `${entry.amount} base units @ ${entry.address}`;
-    return `${entry.functionSignature} arg[${entry.paramIndex}] ${entry.operator} ${entry.value}`;
-  };
+  const labelFor = (entry: Record<string, unknown>): string => describeEntry(key, entry, policy.chain, resolveLabel);
 
   let working = [...(params[key] as Record<string, unknown>[])];
 
@@ -416,7 +565,7 @@ async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveL
             : await buildRecipients(working as never)
           : key === "limits"
             ? await buildLimits(working as never)
-            : await buildRestrictions(working as never);
+            : await buildRestrictions(working as never, false, policy.chain);
       if (built === CANCEL || built === GO_BACK) continue; // aborting Add keeps the working set
       working = built as Record<string, unknown>[];
       continue;
@@ -538,17 +687,21 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
     if (policies.length === 0) {
       p.log.info("No policies on this account yet.");
     } else {
-      for (const policy of policies) p.log.message(describePolicy(policy, resolveLabel));
+      for (const policy of policies) {
+        p.log.message(describePolicy(policy, resolveLabel));
+        const problems = "restrictions" in policy.params ? auditRestrictions(policy.params.restrictions) : [];
+        if (problems.length > 0) {
+          p.log.warn(`Problems with the policy above:\n${problems.map((problem) => `  • ${problem}`).join("\n")}`);
+        }
+      }
     }
 
+    // Nominated approvers aren't enforced by Salt yet, so there's nothing to edit — only delete.
+    const editable = policies.filter((policy) => policy.type !== "nominated_approvers");
     const actionOptions = [
       ...(canEdit ? [{ value: "add", label: "Add policy" }] : []),
-      ...(canEdit && policies.length > 0
-        ? [
-            { value: "edit", label: "Edit policy" },
-            { value: "delete", label: "Delete policy" },
-          ]
-        : []),
+      ...(canEdit && editable.length > 0 ? [{ value: "edit", label: "Edit policy" }] : []),
+      ...(canEdit && policies.length > 0 ? [{ value: "delete", label: "Delete policy" }] : []),
     ];
     // Nothing to do here (view-only account with no policies) — nothing to pick from.
     if (actionOptions.length === 0) return;
@@ -559,7 +712,7 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
     if (action === "add") {
       await addPolicy(salt, accountId, organisationId, resolveLabel);
     } else if (action === "edit") {
-      const policy = await pickPolicy(policies, "Edit which policy?");
+      const policy = await pickPolicy(editable, "Edit which policy?");
       if (policy) await editListPolicy(salt, policy, resolveLabel);
     } else if (action === "delete") {
       const policy = await pickPolicy(policies, "Delete which policy?");

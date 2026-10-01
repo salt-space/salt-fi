@@ -4,8 +4,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages";
 import * as p from "@clack/prompts";
-import type { Salt } from "salt-sdk";
+import type { ContractParamRestriction, Salt } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "../chains.js";
+import { checkRestriction, findConflicts } from "../contract-restrictions.js";
 import { formatSaltError } from "../errors.js";
 import { pickOrganisation } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
@@ -23,7 +24,10 @@ A policy is attached to one account and one chain, and constrains which transact
 - denied_proposers — { recipients: [...] }. IMPORTANT QUIRK: for legacy reasons the addresses live under the "recipients" key, but they are matched against the transaction's PROPOSER (the human signer initiating the transfer), not the recipient. This is what blocks a signer from initiating transfers out of the account.
 - transaction_limit_token_denominated — { limits: [{ address, amount, isWarningSuppressed? }] }. Caps the amount a SINGLE transaction may transfer, per token. "address" is the token contract address; use the zero address (0x0000000000000000000000000000000000000000) for the chain's native asset. "amount" is an integer STRING in the token's base units (wei for 18-decimal tokens; e.g. 1 USDC with 6 decimals = "1000000"). The cap is per-transaction, NOT cumulative across transactions.
 - nominated_approvers — { approvers: [{ address }] }. CANNOT BE CREATED (the API rejects it; not yet implemented / not enforced). Existing ones can be read, updated, or deleted only.
-- contract_param_restriction — { restrictions: [{ contractAddress, functionSignature, paramIndex, operator, value }] }. Restricts the arguments of a contract call. Only applies to transactions calling functionSignature on contractAddress; the decoded argument at paramIndex (zero-based) must satisfy operator/value. functionSignature is human-readable without the "function" keyword, e.g. "transfer(address,uint256)". operator is one of eq, neq, lt, lte, gt, gte — but lt/lte/gt/gte are numeric-only (uint*/int*); address/bool/bytes*/string support only eq/neq. value is an integer string for numeric params, or the literal value (case-insensitive) otherwise. Do NOT supply a solidityType — it's derived automatically.
+- contract_param_restriction — { restrictions: [{ contractAddress, functionSignature, paramIndex, operator, value }] }. Restricts the arguments of a contract call. Only applies to transactions calling functionSignature on contractAddress; the decoded argument at paramIndex (zero-based) must satisfy operator/value. functionSignature is human-readable without the "function" keyword, e.g. "transfer(address,uint256)"; the tools save it in canonical form. operator is one of eq, neq, lt, lte, gt, gte — but lt/lte/gt/gte are numeric-only (uint*/int*); address/bool/bytes*/string support only eq/neq. Do NOT supply a solidityType — it's derived automatically.
+  - value must match the argument's Solidity type exactly: an integer string in base units for uint*/int* (no decimals — convert token amounts with the token's decimals), lowercase "true"/"false" for bool, a full 0x address for address, 0x-hex of the exact length for bytesN. Salt's API doesn't validate value, and a malformed one blocks every call the restriction matches, so the create/update tools check it first and return an ERROR saying what to fix; nothing is saved until it's valid.
+  - Only top-level scalar arguments can be restricted. A struct (tuple) field or an array element can't be reached — e.g. Uniswap's exactInputSingle takes a single struct, so its recipient can't be restricted.
+  - Restrictions are ANDed: every restriction a call matches must pass. Two eq restrictions on the same argument of the same function and contract can never both hold, so together they freeze that function — Salt can't express "either A or B" for one argument. Explain that gap rather than creating them; the tools warn the user if a set of restrictions can't be satisfied.
 
 # Critical rules
 
@@ -31,6 +35,7 @@ A policy is attached to one account and one chain, and constrains which transact
 - "chain" is a STRING: a numeric chain ID like "11155111", or "*" to apply on every chain. A "*" policy and a specific-chain policy of the same type BOTH apply on that chain.
 - update_policy REPLACES the params entirely — it is not a patch. To add one recipient to a whitelist, you must resend the full desired recipients array (fetch the current policy first, then send current + new).
 - You cannot change a policy's type or chain via update — delete and recreate instead.
+- Per-transaction limits only see native value and direct ERC-20 transfer() calls. Swaps, bridges and protocol deposits don't transfer tokens themselves: the contract pulls them with transferFrom after an approve(), which no limit sees. To bound those, restrict the token's approve(address,uint256) with paramIndex 1, operator lte — that caps each approval. It applies to new approvals only (an existing allowance stays as it is), and tokens that also have increaseAllowance(address,uint256), such as USDC, need that restricted too.
 
 Known chain IDs in this app: ${Object.entries(CHAIN_NAME_BY_ID)
   .map(([id, name]) => `${id} (${name})`)
@@ -42,7 +47,7 @@ Known chain IDs in this app: ${Object.entries(CHAIN_NAME_BY_ID)
 - Propose, don't surprise: the create/update/delete tools each show the user the exact change and ask them to confirm before anything happens. If the user declines, acknowledge and adjust — don't retry the same thing.
 - Ask clarifying questions when a request is ambiguous (which account? which chains? native asset or a specific token? exact amount?). Prefer one concise question over a wrong guess.
 - For "copy" requests (whitelist to all chains, all policies from account A to B), read the source policies, then create the equivalent policies on the target — walking the user through each.
-- Advisory questions ("I'm going to trade on AAVE, what policies should I add?"): recommend concrete, specific policies — e.g. a contract_param_restriction limiting which functions/pools, an allowed_recipients whitelist of the protocol's contracts, a transaction_limit to cap per-tx size. Explain the tradeoffs, then offer to create them.
+- Advisory questions ("I'm going to trade on AAVE, what policies should I add?"): recommend concrete, specific policies — e.g. an allowed_recipients whitelist of the protocol's contracts, contract_param_restrictions limiting which spenders the account's tokens may be approved to and capping approve() amounts (which bounds what the protocol can pull per approval), and a transaction_limit for native value. Explain the tradeoffs, then offer to create them.
 - When the user asks for something Salt does NOT support — time-based / scheduled access (e.g. "only on the first of the month"), CUMULATIVE spend limits (Salt limits are per-transaction only), human approval workflows (nominated_approvers isn't enforced), or anything that doesn't map to the six types above — do NOT pretend it works. Explain the gap, then use record_unsupported_policy_request to log it for the Salt team.
 - Be concise. Lead with the answer. When you show policies, translate them into plain language (e.g. "0x5F92… is blocked from proposing transactions on all chains"), don't just dump JSON.`;
 
@@ -68,6 +73,41 @@ async function saltCall<T>(fn: () => Promise<T>): Promise<string> {
   } catch (err) {
     return `ERROR: ${formatSaltError(err)}`;
   }
+}
+
+/**
+ * Check a contract_param_restriction policy's params before the user is asked
+ * to confirm them. Salt's API accepts a malformed value (which then blocks
+ * every call the restriction matches) and restrictions that contradict each
+ * other (which freeze a function), so catch those here. Returns the params to
+ * save — normalised: canonical signatures, checksummed addresses — with any
+ * contradictions as warnings for the confirmation, or an ERROR string for the
+ * model to act on.
+ */
+function checkRestrictionParams(params: unknown): { params: { restrictions: ContractParamRestriction[] }; warnings: string[] } | string {
+  const restrictions = (params as { restrictions?: unknown } | null)?.restrictions;
+  if (!Array.isArray(restrictions) || restrictions.length === 0) {
+    return "ERROR: nothing was saved — contract_param_restriction params must be { restrictions: [...] } with at least one restriction.";
+  }
+  const normalized: ContractParamRestriction[] = [];
+  const errors: string[] = [];
+  restrictions.forEach((restriction, i) => {
+    const checked = checkRestriction(typeof restriction === "object" && restriction !== null ? restriction : {});
+    if (checked.ok) normalized.push(checked.value);
+    else errors.push(`restrictions[${i}]: ${checked.error}`);
+  });
+  if (errors.length > 0) return `ERROR: nothing was saved — fix these restrictions and try again:\n${errors.join("\n")}`;
+  return { params: { restrictions: normalized }, warnings: findConflicts(normalized) };
+}
+
+/** The warnings block appended to a confirmation note, if there are any. */
+function warningNote(warnings: string[]): string {
+  return warnings.length > 0 ? `\n\n⚠ ${warnings.join("\n⚠ ")}` : "";
+}
+
+/** Tell the model what the user was warned about, so it can account for it. */
+function withWarnings(result: string, warnings: string[]): string {
+  return warnings.length > 0 ? `${result}\n\nThe user was shown this warning first: ${warnings.join(" ")}` : result;
 }
 
 function buildTools(ctx: PolicyChatContext) {
@@ -100,7 +140,7 @@ function buildTools(ctx: PolicyChatContext) {
   const createPolicy = betaTool({
     name: "create_policy",
     description:
-      "Create a new policy on an account. Shows the user the proposed policy and asks them to confirm before creating. One policy per (type, chain) — creating a duplicate fails.",
+      "Create a new policy on an account. Shows the user the proposed policy and asks them to confirm before creating. One policy per (type, chain) — creating a duplicate fails. Contract restrictions are validated first: an invalid one returns an ERROR saying what to fix, and nothing is saved.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -127,29 +167,37 @@ function buildTools(ctx: PolicyChatContext) {
       required: ["accountId", "type", "chain", "params"],
     },
     run: async (args) => {
+      let params: unknown = args.params;
+      let warnings: string[] = [];
+      if (args.type === "contract_param_restriction") {
+        const checked = checkRestrictionParams(args.params);
+        if (typeof checked === "string") return checked;
+        ({ params, warnings } = checked);
+      }
       const label = accountLabel(accountNameById, args.accountId);
       p.note(
-        `account: ${label}\ntype:    ${args.type}\nchain:   ${args.chain}\nparams:\n${jsonResult(args.params)}`,
+        `account: ${label}\ntype:    ${args.type}\nchain:   ${args.chain}\nparams:\n${jsonResult(params)}${warningNote(warnings)}`,
         "Proposed new policy",
       );
       const ok = await p.confirm({ message: `Create this policy on ${label}?` });
-      if (p.isCancel(ok) || !ok) return "User declined to create this policy.";
-      return saltCall(() =>
+      if (p.isCancel(ok) || !ok) return withWarnings("User declined to create this policy.", warnings);
+      const result = await saltCall(() =>
         salt.createAccountPolicy({
           accountId: args.accountId,
           organisationId,
           type: args.type,
           chain: args.chain,
-          params: args.params as never,
+          params: params as never,
         }),
       );
+      return withWarnings(result, warnings);
     },
   });
 
   const updatePolicy = betaTool({
     name: "update_policy",
     description:
-      "Replace a policy's params (full replacement, not a patch). Shows the user the before/after and asks them to confirm.",
+      "Replace a policy's params (full replacement, not a patch). Shows the user the before/after and asks them to confirm. Contract restrictions are validated first: an invalid one returns an ERROR saying what to fix, and nothing is saved.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -166,14 +214,22 @@ function buildTools(ctx: PolicyChatContext) {
       } catch (err) {
         return `ERROR fetching current policy: ${formatSaltError(err)}`;
       }
+      let params: unknown = args.params;
+      let warnings: string[] = [];
+      if (current.type === "contract_param_restriction") {
+        const checked = checkRestrictionParams(args.params);
+        if (typeof checked === "string") return checked;
+        ({ params, warnings } = checked);
+      }
       const label = accountLabel(accountNameById, current.accountId ?? "");
       p.note(
-        `account: ${label}\ntype:    ${current.type} (chain ${current.chain})\n\ncurrent params:\n${jsonResult(current.params)}\n\nnew params:\n${jsonResult(args.params)}`,
+        `account: ${label}\ntype:    ${current.type} (chain ${current.chain})\n\ncurrent params:\n${jsonResult(current.params)}\n\nnew params:\n${jsonResult(params)}${warningNote(warnings)}`,
         "Proposed policy update",
       );
       const ok = await p.confirm({ message: `Apply this update on ${label}?` });
-      if (p.isCancel(ok) || !ok) return "User declined to update this policy.";
-      return saltCall(() => salt.updateAccountPolicy(args.policyId, args.params as never));
+      if (p.isCancel(ok) || !ok) return withWarnings("User declined to update this policy.", warnings);
+      const result = await saltCall(() => salt.updateAccountPolicy(args.policyId, params as never));
+      return withWarnings(result, warnings);
     },
   });
 

@@ -260,12 +260,12 @@ async function aggregatedSwapFlow(salt: Salt, walletClient: SaltWalletClient): P
 
   const txs: PreflightTx[] = [
     ...(approveData
-      ? [{ label: `Approve ${sellToken.symbol}`, to: sellToken.address as Address, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
+      ? [{ label: `Approve ${sellToken.symbol}`, to: sellToken.address as Address, value: 0n, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
       : []),
-    { label: "Swap", to: swapTo, data: swapData, whitelistNickname: `LI.FI (${quote.toolDetails?.name ?? quote.tool})` },
+    { label: "Swap", to: swapTo, value: swapValue, data: swapData, whitelistNickname: `LI.FI (${quote.toolDetails?.name ?? quote.tool})` },
   ];
 
-  const decision = await resolvePolicies(salt, accountId, selfAddress, chainId, isOwner, txs, "swap");
+  const decision = await resolvePolicies(salt, { accountId, accountAddress, selfAddress, chainId, isOwner, operation: "swap" }, txs);
   if (decision === "abort") return;
   if (decision === "clear") {
     const confirmed = await p.confirm({ message: "Execute this swap?" });
@@ -502,9 +502,9 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
 
   const txs: PreflightTx[] = [
     ...(approveNeeded
-      ? [{ label: `Approve ${sellToken.symbol}`, to: sellAddress, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
+      ? [{ label: `Approve ${sellToken.symbol}`, to: sellAddress, value: 0n, data: approveData, whitelistNickname: `${sellToken.symbol} token` }]
       : []),
-    { label: "Swap", to: deployment.swapRouter02, data: swapData, whitelistNickname: "Uniswap SwapRouter02" },
+    { label: "Swap", to: deployment.swapRouter02, value: 0n, data: swapData, whitelistNickname: "Uniswap SwapRouter02" },
   ];
 
   // Check the swap against the account's policies (whitelist, limits, contract
@@ -512,7 +512,7 @@ async function fastSwapFlow(salt: Salt, walletClient: SaltWalletClient): Promise
   // missing whitelist entry inline; otherwise the user can proceed and see it
   // fail (the "proceed anyway" prompt is itself the go-ahead, so skip the
   // normal confirm in that case).
-  const decision = await resolvePolicies(salt, accountId, selfAddress, chainId, isOwner, txs, "swap");
+  const decision = await resolvePolicies(salt, { accountId, accountAddress, selfAddress, chainId, isOwner, operation: "swap" }, txs);
   if (decision === "abort") return;
   if (decision === "clear") {
     const confirmed = await p.confirm({ message: "Execute this swap?" });

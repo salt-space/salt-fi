@@ -282,10 +282,24 @@ guided walkthrough at the top and the individual tools organised into submenus.
 - **Manage policies** — form-driven CRUD for an account's transaction
   policies (whitelist / blocklist, denied proposers, per-transaction limits,
   contract-call restrictions) across chains. List, add, edit, and delete
-  policies via guided prompts, with a few contract-restriction presets (e.g.
-  "ERC-20 transfer — only to a specific recipient") to save typing. **No API
-  key required** — this is the plain, always-available way to manage
-  policies; Policy chat below is the natural-language alternative.
+  policies via guided prompts, with contract-restriction presets (e.g.
+  "ERC-20 approve — only a specific spender", or "cap the allowance", which
+  bounds what a router, bridge or pool can pull — per-transaction limits
+  don't see those pulls). Custom restrictions parse the function signature
+  up front, let you pick the argument by name and type, and only accept
+  operators and values Salt can compare for it. That matters because Salt
+  doesn't validate restriction values, and a malformed one blocks every
+  matching call. Restrictions that contradict each other (they're ANDed) are
+  flagged before saving, and broken ones already on an account are flagged in
+  the list. **No API key required** — this is the plain, always-available way
+  to manage policies; Policy chat below is the natural-language alternative.
+- **Policy pre-checks** — Swap, Bridge and the Hinkal deposit check the exact
+  transactions they're about to submit against the account's policies, as
+  the Robo Guardians will (native value included). A breach is explained, not
+  just named (e.g. "approve(): amount must be ≤ 100000000; this call has
+  250000000"). Policies on the chain that *don't* constrain the operation are
+  listed too, so a token limit next to a swap of that token isn't mistaken
+  for protection.
 - **Policy chat** — a natural-language agent for reading and managing an
   account's transaction policies (whitelists, per-transaction limits, denied
   proposers, contract-function restrictions). Ask things like "what are my

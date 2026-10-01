@@ -6,11 +6,36 @@ import {
   InvalidAddress,
   InvalidAuthToken,
   InvalidSigner,
+  PolicyBreachError,
   RoboStatusError,
   SocketConnectError,
   ValidationError,
 } from "salt-sdk";
 import { CHAIN_NAME_BY_ID } from "./chains.js";
+import { describePolicy } from "./policies.js";
+
+/** Entry lines shown per rejected policy before eliding the rest (a whitelist can be long). */
+const BREACH_ENTRY_LINES = 5;
+
+/**
+ * A policy breach, with each rejected policy described — the SDK's own message
+ * names them only by id and type slug. Flows that pre-check with
+ * `resolvePolicies` explain breaches in more detail before submitting; this
+ * covers the ones that submit directly.
+ */
+function formatPolicyBreach(err: PolicyBreachError): string {
+  const described = err.rejectedPolicies.map((policy) => {
+    const [header, ...entries] = describePolicy(policy).split("\n");
+    const shown = entries.slice(0, BREACH_ENTRY_LINES);
+    if (entries.length > shown.length) shown.push(`  …and ${entries.length - shown.length} more`);
+    return [`  • ${header}`, ...shown.map((line) => `    ${line}`)].join("\n");
+  });
+  return (
+    "Blocked by account policy — the Robo Guardians won't co-sign this transaction:\n" +
+    (described.length > 0 ? described.join("\n") : "  • (the rejecting policy wasn't reported)") +
+    '\nAn owner can review these in "Manage policies".'
+  );
+}
 
 /**
  * Whether `err` means the current session's token is expired/rejected and a
@@ -33,6 +58,9 @@ export function formatSaltError(err: unknown): string {
   }
   if (err instanceof InvalidSigner) {
     return "The wallet client has no attached signer account.";
+  }
+  if (err instanceof PolicyBreachError) {
+    return formatPolicyBreach(err);
   }
   if (err instanceof InsufficientFunds) {
     // The SDK's own error already names the real chain this transaction was for — this app now
