@@ -1,0 +1,903 @@
+<title>Salt SDK Field Guide</title>
+<meta name="description" content="Technical onboarding for teams evaluating Salt: salt-fi, signing in, Robo Guardians installed by Claude Code over SSH, and the policy layer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root {
+  --ground: #f3f5f3;
+  --surface: #ffffff;
+  --ink: #15201d;
+  --ink-2: #33423e;
+  --muted: #5d6b67;
+  --rule: #d7dedb;
+  --accent: #17695f;
+  --accent-ink: #0f4b44;
+  --accent-soft: #e0eeea;
+  --warn: #7c5200;
+  --warn-soft: #faf0da;
+  --code-bg: #ecf1ef;
+  --term-bg: #0b1110;
+  --term-bar: #141c1b;
+  --term-fg: #d4ddd9;
+  --term-muted: #7f8c88;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0c1211;
+    --surface: #121a19;
+    --ink: #e3eae7;
+    --ink-2: #c2cdc9;
+    --muted: #93a29e;
+    --rule: #25302e;
+    --accent: #5cc2b3;
+    --accent-ink: #8ad8cc;
+    --accent-soft: #14302b;
+    --warn: #e2b45c;
+    --warn-soft: #2a2312;
+    --code-bg: #172120;
+    --term-bg: #070b0a;
+    --term-bar: #0f1615;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0c1211;
+  --surface: #121a19;
+  --ink: #e3eae7;
+  --ink-2: #c2cdc9;
+  --muted: #93a29e;
+  --rule: #25302e;
+  --accent: #5cc2b3;
+  --accent-ink: #8ad8cc;
+  --accent-soft: #14302b;
+  --warn: #e2b45c;
+  --warn-soft: #2a2312;
+  --code-bg: #172120;
+  --term-bg: #070b0a;
+  --term-bar: #0f1615;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-inline: 20px;
+  padding-block: 0 64px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code, kbd { font-family: var(--font-mono); font-size: 0.88em; }
+p code, li code, td code, figcaption code, blockquote code {
+  background: var(--code-bg);
+  padding: 0.08em 0.35em;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.page {
+  max-width: 1140px;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+}
+@media (min-width: 980px) {
+  .page { grid-template-columns: 200px minmax(0, 760px); justify-content: center; column-gap: 56px; row-gap: 0; }
+  header.intro { grid-column: 2; grid-row: 1; }
+  .toc { grid-column: 1; grid-row: 1 / span 2; }
+  main { grid-column: 2; grid-row: 2; }
+}
+
+/* Contents rail */
+.toc { padding-top: 28px; }
+.toc h2 {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.toc a {
+  display: block;
+  padding: 5px 10px;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.toc a:hover { color: var(--accent-ink); border-left-color: var(--accent); }
+.toc a[aria-current="true"] { color: var(--accent-ink); border-left-color: var(--accent); font-weight: 500; }
+@media (min-width: 980px) {
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 72px; }
+}
+@media (max-width: 979px) {
+  .toc { order: 2; padding-top: 0; }
+  .toc ol { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .toc a { border: 1px solid var(--rule); border-radius: 999px; padding: 4px 12px; font-size: 13px; background: var(--surface); }
+}
+
+main { min-width: 0; order: 3; }
+
+/* Header */
+header.intro { padding-top: 56px; padding-bottom: 8px; order: 1; }
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin: 0 0 14px;
+}
+h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(34px, 5vw, 48px);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  margin: 0 0 18px;
+  text-wrap: balance;
+}
+.thesis {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(22px, 2.8vw, 27px);
+  line-height: 1.25;
+  color: var(--ink);
+  max-width: 40ch;
+  margin: 0 0 18px;
+  text-wrap: balance;
+}
+.lede { font-size: 17.5px; line-height: 1.6; color: var(--ink-2); max-width: 66ch; margin: 0 0 14px; }
+.callout {
+  margin: 20px 0;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  font-size: 16.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  max-width: 66ch;
+}
+.callout .label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 4px;
+}
+.open-line { font-family: var(--font-display); font-size: 20px; font-weight: 600; line-height: 1.3; color: var(--ink); margin: 0 0 14px; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 26px 0 0;
+}
+.facts div { background: var(--surface); padding: 12px 14px; }
+.facts dt {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.facts dd { margin: 0; font-size: 14.5px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Sections */
+section { padding-top: 56px; scroll-margin-top: 16px; }
+section > h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(25px, 3.2vw, 31px);
+  line-height: 1.15;
+  margin: 0 0 16px;
+  text-wrap: balance;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.3;
+  margin: 34px 0 10px;
+  text-wrap: balance;
+}
+p, ul, ol { max-width: 68ch; }
+p { margin: 0 0 14px; }
+ul, ol { padding-left: 22px; margin: 0 0 16px; }
+li { margin-bottom: 6px; }
+li::marker { color: var(--muted); }
+strong { font-weight: 600; }
+
+.step-head { display: flex; align-items: baseline; gap: 12px; }
+.step-num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 6px;
+  padding: 2px 8px;
+  flex: none;
+}
+
+/* Callouts */
+.note {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin: 22px 0;
+}
+.note h4 { font-family: var(--font-display); font-size: 15.5px; font-weight: 600; margin: 0 0 6px; }
+.note p:last-child, .note ul:last-child { margin-bottom: 0; }
+.note.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.note.warn h4 { color: var(--warn); }
+
+.prompt {
+  margin: 16px 0 22px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  font-size: 15.5px;
+  line-height: 1.55;
+  max-width: 68ch;
+}
+.prompt .label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 4px;
+}
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 16px 0 22px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+tr:last-child td { border-bottom: 0; }
+th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--code-bg) 60%, var(--surface));
+}
+td code { white-space: nowrap; }
+td.params code { white-space: normal; }
+
+/* Code blocks */
+.code-wrap { position: relative; margin: 14px 0 22px; }
+pre.code {
+  margin: 0;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  tab-size: 2;
+}
+pre.code .c { color: var(--muted); font-style: italic; }
+pre.code .s { color: var(--accent-ink); }
+.copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font: 500 12px var(--font-body);
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.copy:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+/* Diagram */
+.diagram-fig { margin: 18px 0 22px; }
+.diagram { padding: 16px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; color: var(--ink-2); }
+.diagram-fig figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 68ch; }
+.fg-svg { display: block; width: 100%; min-width: 560px; height: auto; font-family: var(--font-body); }
+.fg-node { fill: var(--surface); stroke: color-mix(in srgb, currentColor 35%, transparent); stroke-width: 1; }
+.fg-key { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+.fg-key-text { fill: var(--accent-ink); }
+.fg-muted { fill: var(--muted); }
+.fg-section { fill: var(--muted); font-weight: 600; letter-spacing: 0.08em; }
+.fg-life { stroke: currentColor; stroke-opacity: 0.45; stroke-dasharray: 2 5; }
+.fg-frame { fill: none; stroke: color-mix(in srgb, currentColor 28%, transparent); }
+.fg-divider { stroke: color-mix(in srgb, currentColor 28%, transparent); stroke-dasharray: 4 4; }
+.fg-msg { stroke: currentColor; stroke-width: 1.4; fill: none; }
+.fg-reject { stroke: var(--warn); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+.fg-warn-fill, .fg-warn-text { fill: var(--warn); }
+.fg-mask { fill: var(--surface); }
+
+/* Terminal recordings */
+.rec { margin: 18px 0 26px; container-type: inline-size; }
+.rec-frame { background: var(--term-bg); border-radius: 12px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent); }
+.rec-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--term-bar);
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+}
+.rec-dots { display: flex; gap: 6px; flex: none; }
+.rec-dots i { width: 10px; height: 10px; border-radius: 50%; background: color-mix(in srgb, var(--term-fg) 22%, transparent); display: block; }
+.rec-title { font: 500 12.5px var(--font-mono); color: var(--term-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-scroll { overflow-x: auto; }
+pre.term {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: max(9px, min(12.5px, calc((100cqi - 30px) / 62)));
+  line-height: 1.28;
+  color: var(--term-fg);
+  background: var(--term-bg);
+  width: max-content;
+  min-width: 100%;
+}
+pre.term .row { display: block; white-space: pre; min-height: 1.28em; }
+.term .b { font-weight: 600; }
+.term .u { text-decoration: underline; }
+.term .f-black { color: #45504d; } .term .f-red { color: #f28b82; } .term .f-green { color: #8fd3a0; }
+.term .f-brown { color: #e9c46a; } .term .f-blue { color: #82aaff; } .term .f-magenta { color: #d5a1ec; }
+.term .f-cyan { color: #6fd6e4; } .term .f-white { color: #d4ddd9; }
+.term .f-brightblack { color: #7f8c88; } .term .f-brightred { color: #ff9e97; } .term .f-brightgreen { color: #a8e6b7; }
+.term .f-brightbrown { color: #f3d58a; } .term .f-brightblue { color: #a3c1ff; } .term .f-brightmagenta { color: #e4bdf5; }
+.term .f-brightcyan { color: #9ce6f0; } .term .f-brightwhite { color: #ffffff; }
+.term .g-black { background: #45504d; } .term .g-red { background: #8a2f2a; } .term .g-green { background: #245e35; }
+.term .g-brown { background: #6e5516; } .term .g-blue { background: #26407a; } .term .g-magenta { background: #5e2f75; }
+.term .g-cyan { background: #1d5d66; } .term .g-white { background: #d4ddd9; color: #0b1110; }
+.term .f-rev { color: var(--term-bg); } .term .g-rev { background: var(--term-fg); }
+.term .cur { background: var(--term-fg); color: var(--term-bg); }
+.rec-ctl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--term-bar);
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+}
+.rec-ctl button {
+  font: 500 12.5px var(--font-body);
+  color: var(--term-fg);
+  background: color-mix(in srgb, var(--term-fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  border-radius: 6px;
+  padding: 4px 11px;
+  cursor: pointer;
+  flex: none;
+}
+.rec-ctl button:hover { background: color-mix(in srgb, var(--term-fg) 18%, transparent); }
+.rec-play { min-width: 64px; }
+.rec-progress { flex: 1; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--term-fg) 14%, transparent); cursor: pointer; position: relative; min-width: 60px; }
+.rec-progress span { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 3px; background: #5cc2b3; }
+.rec-time { font: 12px var(--font-mono); color: var(--term-muted); font-variant-numeric: tabular-nums; flex: none; }
+.rec figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 68ch; }
+
+footer.end { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="page">
+  <header class="intro">
+    <p class="eyebrow">Technical onboarding · 30 September 2026</p>
+    <h1>Salt SDK Field Guide</h1>
+    <p class="thesis">Salt is an MPC wallet layer built by traders who wanted more control, less vendor risk and lower costs.</p>
+    <p class="lede">Accounts are MPC wallets, where every key share is generated and held on your own hardware – distributed across co-signers' devices and self-provisioned automated co-signers that Salt calls Robo Guardians. Salt never holds key material, and a smart contract on Arbitrum keeps an encrypted backup of each share for portability and account recovery. It's a novel system of self-sovereignty, built to minimise trust within an MPC setup. Every transaction is checked against the account's policies before the Robo Guardians add their signature.</p>
+    <p class="lede">Normal setup takes around 20 minutes. Once familiar, you can speed run it in under 10 mins. AI can assist with the install (we demo Claude setting up the Robo Guardians <a href="#robos">below</a>).</p>
+    <p class="callout"><span class="label">Fun fact</span>Salt is the only MPC solution that AI agents can discover and use themselves without human assistance – no API keys needed; authentication uses cryptographic keypairs.</p>
+    <p class="open-line">Salt is an open system to humans and machines.</p>
+    <p class="lede">This guide takes your team from an empty terminal to a policy-protected account on testnet, using salt-fi as a working reference for each SDK call. Mainnet is also supported.</p>
+    <dl class="facts">
+      <div><dt>Start on</dt><dd>Testnet · <code>testnet.salt.space</code></dd></div>
+      <div><dt>Runtime</dt><dd>Node.js 24+, ES modules</dd></div>
+      <div><dt>Reference app</dt><dd><a href="https://github.com/salt-space/salt-fi">salt-space/salt-fi</a></dd></div>
+      <div><dt>SDK</dt><dd><a href="https://www.npmjs.com/package/salt-sdk"><code>salt-sdk</code></a> 0.0.43</dd></div>
+    </dl>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#flow">How a transaction is signed</a></li>
+      <li><a href="#salt-fi">Start with salt-fi</a></li>
+      <li><a href="#identity">Your wallet is your identity</a></li>
+      <li><a href="#robos">Robo Guardians over SSH</a></li>
+      <li><a href="#policies">The policy layer</a></li>
+      <li><a href="#sdk">Using the SDK directly</a></li>
+      <li><a href="#next">Where to go next</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="flow">
+      <h2>How a Salt transaction gets signed</h2>
+      <p>An <strong>organisation</strong> holds your <strong>accounts</strong> and the <strong>collaborators</strong> who sign for them. Each organisation has one set of <strong>Robo Guardians</strong>, the automated co-signers. <strong>Policies</strong> attach to accounts, one set per chain.</p>
+      <figure class="diagram-fig">
+        <div class="diagram">
+          <svg class="fg-svg" viewBox="0 0 720 502" role="img" aria-label="Your signer proposes a transaction to the Salt API, which checks the account's policies. If a policy is breached, the transaction is rejected and nothing is signed. If every policy passes, Salt asks the Robo Guardians to co-sign. They join an MPC signing ceremony with your signer, check that the payload is the one the policy check ran on, refuse if it isn't, and return their signature shares. Your signer then broadcasts the signed transaction.">
+            <defs>
+              <marker id="fg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+              <marker id="fg-arrow-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="fg-warn-fill" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <line class="fg-life" x1="120" y1="60" x2="120" y2="490"/>
+            <line class="fg-life" x1="360" y1="60" x2="360" y2="490"/>
+            <line class="fg-life" x1="600" y1="60" x2="600" y2="490"/>
+            <rect class="fg-frame" x="16" y="164" width="688" height="326" rx="10"/>
+            <line class="fg-divider" x1="16" y1="232" x2="704" y2="232"/>
+            <rect class="fg-mask" x="26" y="173" width="178" height="15"/>
+            <text class="fg-section" x="30" y="184" font-size="10.5">IF A POLICY IS BREACHED</text>
+            <rect class="fg-mask" x="26" y="241" width="170" height="15"/>
+            <text class="fg-section" x="30" y="252" font-size="10.5">IF EVERY POLICY PASSES</text>
+
+            <g text-anchor="middle">
+              <rect class="fg-node" x="28" y="12" width="184" height="48" rx="8"/>
+              <text x="120" y="32" font-size="13.5" font-weight="600" fill="currentColor">Your signer</text>
+              <text class="fg-muted" x="120" y="50" font-size="11.5">wallet + salt-sdk</text>
+              <rect class="fg-node" x="268" y="12" width="184" height="48" rx="8"/>
+              <text x="360" y="32" font-size="13.5" font-weight="600" fill="currentColor">Salt API</text>
+              <text class="fg-muted" x="360" y="50" font-size="11.5">policy engine</text>
+              <rect class="fg-node" x="508" y="12" width="184" height="48" rx="8"/>
+              <text x="600" y="32" font-size="13.5" font-weight="600" fill="currentColor">Robo Guardians</text>
+              <text class="fg-muted" x="600" y="50" font-size="11.5">on your server</text>
+
+              <line class="fg-msg" x1="120" y1="100" x2="357" y2="100" marker-end="url(#fg-arrow)"/>
+              <text x="238" y="91" font-size="12.5" fill="currentColor">propose transaction</text>
+              <rect class="fg-key" x="270" y="114" width="180" height="34" rx="6"/>
+              <text class="fg-key-text" x="360" y="136" font-size="12.5" font-weight="500">check account policies</text>
+
+              <line class="fg-reject" x1="360" y1="212" x2="123" y2="212" marker-end="url(#fg-arrow-warn)"/>
+              <text class="fg-warn-text" x="240" y="203" font-size="12.5">rejected, nothing is signed</text>
+
+              <line class="fg-msg" x1="360" y1="282" x2="597" y2="282" marker-end="url(#fg-arrow)"/>
+              <text x="480" y="273" font-size="12.5" fill="currentColor">ask them to co-sign</text>
+              <line class="fg-msg" x1="123" y1="326" x2="597" y2="326" marker-start="url(#fg-arrow)" marker-end="url(#fg-arrow)"/>
+              <rect class="fg-mask" x="292" y="305" width="136" height="16"/>
+              <text x="360" y="317" font-size="12.5" fill="currentColor">MPC signing ceremony</text>
+              <rect class="fg-key" x="500" y="346" width="200" height="48" rx="6"/>
+              <text class="fg-key-text" x="600" y="366" font-size="12.5" font-weight="500">same payload as checked?</text>
+              <text class="fg-warn-text" x="600" y="384" font-size="11.5">if not, they refuse</text>
+              <line class="fg-msg" x1="600" y1="420" x2="123" y2="420" marker-end="url(#fg-arrow)"/>
+              <text x="480" y="411" font-size="12.5" fill="currentColor">signature shares</text>
+              <rect class="fg-node" x="30" y="438" width="180" height="34" rx="6"/>
+              <text x="120" y="460" font-size="12.5" fill="currentColor">broadcast signed tx</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption>Policies are checked before anyone co-signs, and the Robo Guardians only sign the payload that was checked.</figcaption>
+      </figure>
+      <p>The check runs on the exact transaction the signers will sign. During the ceremony each Robo Guardian hashes the payload it's asked to sign and compares it with the transaction record the policy check ran on. If they differ, it refuses to sign.</p>
+    </section>
+
+    <section id="salt-fi">
+      <h2>Start with salt-fi</h2>
+      <p>salt-fi is a terminal app that walks through Salt end to end: organisations, Robo Guardians, accounts, transfers, swaps and policies. Each menu item is a short, readable use of the SDK, so the source doubles as example code. It's open source under Apache-2.0 and maintained independently by one of Salt's founders; it isn't an official Salt product.</p>
+      <p><a href="https://github.com/salt-space/salt-fi">github.com/salt-space/salt-fi</a> · the <a href="https://github.com/salt-space/salt-fi#readme">README</a> documents every menu item.</p>
+
+      <h3>Set up</h3>
+      <p>You need Node.js 24 or newer, Git, and a throwaway EVM private key for testnet. Never use a key that holds real funds.</p>
+      <div class="code-wrap"><pre class="code"><code>git clone https://github.com/salt-space/salt-fi.git
+cd salt-fi
+npm install
+cp .env.example .env     <span class="c"># then set PRIVATE_KEY=0x…</span>
+npm run dev:testnet</code></pre></div>
+      <p>Pick <strong>Getting started</strong> the first time. It walks through the five setup steps in order, explains each one, and resumes where you left off:</p>
+      <ol>
+        <li>Create an organisation. You're its owner.</li>
+        <li>Invite a collaborator. Accounts need at least two collaborators, the owner plus one more.</li>
+        <li>Set up Robo Guardians.</li>
+        <li>Create an account. This runs an MPC key-generation ceremony between the signers and the Robo Guardians.</li>
+        <li>Add a first policy.</li>
+      </ol>
+
+      <h3>Where the SDK calls live</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>What you're doing</th><th>salt-fi source</th></tr></thead>
+        <tbody>
+          <tr><td>Signing in and caching the session</td><td><code>src/session.ts</code></td></tr>
+          <tr><td>Organisations and Robo Guardian setup</td><td><code>src/commands/create-organisation.ts</code><br><code>src/commands/robos.ts</code></td></tr>
+          <tr><td>Creating accounts (key generation)</td><td><code>src/commands/accounts.ts</code></td></tr>
+          <tr><td>Sending, with live signing progress</td><td><code>src/commands/send.ts</code></td></tr>
+          <tr><td>Policy pre-checks before a swap or bridge</td><td><code>src/commands/tx-preflight.ts</code></td></tr>
+          <tr><td>Managing policies</td><td><code>src/commands/policy-management.ts</code><br><code>src/policies.ts</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Or build your own front end</h3>
+      <p>Salt supports a tenant model, so you can build your own front end on the SDK instead. That gives you more control, and an experience built around how your team works. Ask Salt to approve your tenant domain; <code>localhost</code> works for development. Pass that domain as <code>domain</code> when you create the <code>Salt</code> client. It goes into every sign-in message your users sign, and Salt resolves your tenant from it. You still set up Robo Guardians through salt-fi or Salt's web app.</p>
+      <div class="code-wrap"><pre class="code"><code>const salt = new Salt({
+  environment: <span class="s">"TESTNET"</span>,
+  domain: <span class="s">"app.example.com"</span>,                   <span class="c">// your approved tenant domain</span>
+  siweStatement: <span class="s">"Sign in to Example Treasury"</span>, <span class="c">// shown in the wallet prompt</span>
+});</code></pre></div>
+      <p>Salt's own web app, due for release in November 2026, is built entirely on the Salt SDK.</p>
+    </section>
+
+    <section id="identity">
+      <h2>Signing in: your wallet is your identity</h2>
+      <p>There are no Salt usernames or passwords. You sign in with <strong>Sign-In with Ethereum (SIWE)</strong>: the SDK has your wallet sign a standard login message, and Salt verifies the signature and issues a session token. The key stays on your machine. Nothing goes on-chain and there's no gas to pay.</p>
+      <p>That wallet's address is who you are in Salt:</p>
+      <ul>
+        <li><strong>Organisations</strong> invite you by address, and you accept with the same wallet. Your access level (owner, member or agent) is attached to that address, and only owners can change policies.</li>
+        <li><strong>Accounts</strong> you co-sign use this wallet in their key-generation and signing ceremonies.</li>
+        <li><strong>Backups</strong> are encrypted to this wallet's public key, which Salt recovers from your sign-in signature. Your key-share backups are written to Salt's shard registry contract on Arbitrum, and Salt pays the gas. If you set up the organisation's Robo Guardians, their seed backup is encrypted to your key too. Back the key up like any other.</li>
+      </ul>
+      <p>Give every person and every automated signer on your team its own key. Sessions are issued per environment: <code>testnet.salt.space</code> for testnet and <code>app.salt.space</code> for mainnet. salt-fi asks which to use at launch.</p>
+    </section>
+
+    <section id="robos">
+      <h2>Robo Guardians, installed by Claude Code over SSH</h2>
+      <p>Robo Guardians are your organisation's automated co-signers. They hold key shares for every account, enforce policies by refusing to sign anything the check rejected, and run on a server you control. Each host runs three signers in one Docker container. Their seed is generated on that server and encrypted to the owner's wallet key before an encrypted backup goes to Salt.</p>
+      <p>salt-fi generates a one-shot install script for any Ubuntu or Debian server, or an AWS CloudFormation link that does the same with no server access. Below, Claude Code installs the script over SSH. These are replays of a real session on testnet, for a demo organisation called Nara Capital.</p>
+
+      <h3 class="step-head"><span class="step-num">1 of 3</span>Create the organisation and its setup script</h3>
+      <p>In salt-fi, choose <strong>Organisation → Create organisation</strong>, accept the offer to set up Robo Guardians, and pick the self-hosted install script. salt-fi writes <code>robo-setup-&lt;org&gt;-&lt;id&gt;.sh</code> to the project folder. It contains the host's one-time setup code, so treat it like a password. It's gitignored.</p>
+      <figure class="rec" data-src="rec-nara-create-org">
+        <div class="rec-frame">
+          <div class="rec-bar"><span class="rec-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="rec-title">salt-fi · create an organisation and its setup script</span></div>
+          <div class="term-scroll"><pre class="term" aria-label="Terminal replay: creating the Nara Capital organisation in salt-fi">{{POSTER nara-create-org}}</pre></div>
+          <div class="rec-ctl"><button type="button" class="rec-play">Play</button><button type="button" class="rec-speed" aria-label="Playback speed">1×</button><div class="rec-progress" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div><span class="rec-time">{{DURATION nara-create-org}}</span></div>
+        </div>
+        <figcaption>Signing in, creating Nara Capital, registering its Robo Guardian host and writing the install script.</figcaption>
+      </figure>
+
+      <h3 class="step-head"><span class="step-num">2 of 3</span>Let Claude Code install it over SSH</h3>
+      <p>Open Claude Code in the salt-fi folder, give it the server, and say what's already running there. For example:</p>
+      <p class="prompt"><span class="label">Prompt to Claude Code</span>Set up Nara Capital's Robo Guardians on my server: <code>ssh -i ~/.ssh/&lt;key&gt; root@&lt;server-ip&gt;</code>. It already runs robos for other organisations. Look first without changing anything, adapt the setup script so it can't collide with them, and show me the changes before you run it.</p>
+      <p>Claude looked at the server first and found three robos already running there. The stock script expects to be the only robo on a server: it refuses to run next to an existing one, and its Docker install step could upgrade Docker, restarting the daemon and briefly stopping every robo on the box. So Claude gave the new robo its own container name, directory, update job and cron entry, skipped the Docker reinstall, showed the diff, and ran it once approved.</p>
+      <figure class="rec" data-src="rec-nara-ssh-setup">
+        <div class="rec-frame">
+          <div class="rec-bar"><span class="rec-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="rec-title">Claude Code · install on a shared server over SSH</span></div>
+          <div class="term-scroll"><pre class="term" aria-label="Terminal replay: installing Nara Capital's Robo Guardians over SSH">{{POSTER nara-ssh-setup}}</pre></div>
+          <div class="rec-ctl"><button type="button" class="rec-play">Play</button><button type="button" class="rec-speed" aria-label="Playback speed">1×</button><div class="rec-progress" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div><span class="rec-time">{{DURATION nara-ssh-setup}}</span></div>
+        </div>
+        <figcaption>A replay of the commands Claude Code ran. <code>$VPS</code> stands in for <code>root@&lt;server-ip&gt;</code>. Pauses longer than 1.4 seconds are shortened.</figcaption>
+      </figure>
+
+      <h3 class="step-head"><span class="step-num">3 of 3</span>Check they're online, then activate them</h3>
+      <p>Back in salt-fi, <strong>Robo Guardians → Check robo guardians</strong> should list three signers online. They can't sign until the owner activates them. <strong>Activate Robo Guardians (2FA)</strong> signs a message with the owner's wallet that includes the setup code, and activation consumes that code.</p>
+      <figure class="rec" data-src="rec-nara-activate">
+        <div class="rec-frame">
+          <div class="rec-bar"><span class="rec-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="rec-title">salt-fi · check and activate the Robo Guardians</span></div>
+          <div class="term-scroll"><pre class="term" aria-label="Terminal replay: checking and activating Nara Capital's Robo Guardians">{{POSTER nara-activate}}</pre></div>
+          <div class="rec-ctl"><button type="button" class="rec-play">Play</button><button type="button" class="rec-speed" aria-label="Playback speed">1×</button><div class="rec-progress" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div><span class="rec-time">{{DURATION nara-activate}}</span></div>
+        </div>
+        <figcaption>Three of three online, then activation, then a second check confirming the robos can sign.</figcaption>
+      </figure>
+
+      <div class="note warn">
+        <h4>Hosting several organisations' robos on one server</h4>
+        <p>The install script uses a fixed container name (<code>robos</code>) and directory (<code>/salt/robos</code>). For each additional organisation, give its robo its own name and directory, point its <code>update_docker.sh</code> and cron entry at them, and don't reinstall Docker on a server that's already running robos. That's the whole of Claude's change in step 2. The <a href="https://github.com/salt-space/salt-fi/blob/main/docs/robo-hosting/hostinger.md">Hostinger guide</a> in salt-fi covers doing it by hand.</p>
+      </div>
+    </section>
+
+    <section id="policies">
+      <h2>The policy layer</h2>
+      <p>Policies are granular rules attached to an account, per chain. Salt evaluates every applicable policy together against each transaction the account proposes, before any co-signing. If a policy is breached, the Robo Guardians won't sign and the SDK throws a <code>PolicyBreachError</code> listing the policies that blocked it.</p>
+
+      <h3>The six policy types</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Type</th><th>What it constrains</th><th>Params</th></tr></thead>
+        <tbody>
+          <tr><td><code>allowed_recipients</code></td><td>Only these addresses may receive funds.</td><td class="params"><code>{ recipients: [{ address, nickname? }] }</code></td></tr>
+          <tr><td><code>denied_recipients</code></td><td>These addresses may not receive funds.</td><td class="params"><code>{ recipients: [...] }</code></td></tr>
+          <tr><td><code>denied_proposers</code></td><td>These signers may not propose transactions. The addresses sit under <code>recipients</code> for legacy reasons.</td><td class="params"><code>{ recipients: [...] }</code></td></tr>
+          <tr><td><code>transaction_limit_token_denominated</code></td><td>The most one transaction may move, per token. The zero address means the native asset.</td><td class="params"><code>{ limits: [{ address, amount }] }</code></td></tr>
+          <tr><td><code>contract_param_restriction</code></td><td>Arguments of specific contract calls.</td><td class="params"><code>{ restrictions: [{ contractAddress, functionSignature, paramIndex, operator, value }] }</code></td></tr>
+          <tr><td><code>nominated_approvers</code></td><td>Required approvals. Not enforced yet, and it can't be created.</td><td class="params"><code>{ approvers: [{ address }] }</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>How they combine</h3>
+      <ul>
+        <li>There's one policy per type per chain. The chain is a chain ID string, or <code>"*"</code> for every chain, and a <code>"*"</code> policy and a chain-specific one of the same type both apply.</li>
+        <li>An allowlist and a blocklist both apply, so an address on both is blocked.</li>
+        <li>Updating a policy replaces its params, so send the full list.</li>
+        <li>Limits are per transaction, not cumulative. An amount of <code>"0"</code> freezes that asset.</li>
+        <li>A contract restriction applies only to calls of its function on its contract, and every restriction a call matches must pass. Two <code>eq</code> restrictions on the same argument can never both hold, so together they block that function entirely.</li>
+        <li>Restriction values aren't validated when saved, and a malformed one blocks every call it matches. Only top-level arguments can be restricted (numbers, addresses, bools, bytes and strings), not struct fields or array elements.</li>
+      </ul>
+
+      <div class="note">
+        <h4>What policies see, and what they don't</h4>
+        <ul>
+          <li><strong>Limits see native value and direct <code>transfer()</code> calls.</strong> A router, bridge or pool that pulls tokens with <code>transferFrom</code> after an <code>approve()</code> isn't limited. To bound that, restrict the token's <code>approve(address,uint256)</code> amount: <code>paramIndex</code> 1, operator <code>lte</code>.</li>
+          <li><strong>For contract calls, an allowlist is checked against the contract being called.</strong> To swap, both the token (for the approval) and the router have to be on it. Pin who can be approved with a restriction on the spender: <code>paramIndex</code> 0, operator <code>eq</code>.</li>
+          <li><strong>Signed messages aren't transactions.</strong> A Permit2 permit or an off-chain order is typed data, so account policies don't evaluate it. The pull it authorises happens later, in someone else's transaction.</li>
+          <li><strong>Relayed flows leave the policy boundary.</strong> Once funds sit in a system whose relayer moves them, such as a privacy pool, those movements aren't the account's transactions.</li>
+        </ul>
+      </div>
+
+      <h3>Check before you submit</h3>
+      <p><code>runPoliciesCheck</code> evaluates a proposed transaction without signing anything. Fill it the way <code>submitTx</code> will, or the answer won't match what the Robo Guardians see.</p>
+      <div class="code-wrap"><pre class="code"><code>const fees = await salt.getGasPrice(421614);
+const check = await salt.runPoliciesCheck(accountId, {
+  nonce: await salt.getAccountNonce(accountId, 421614),
+  from: accountAddress,         <span class="c">// the Salt account's address, not your signer's</span>
+  to: router,
+  amount: value.toString(),     <span class="c">// native value in wei: native limits read it</span>
+  data: calldata,
+  network: <span class="s">"421614"</span>,
+  gas: <span class="s">"500000"</span>,
+  maxFeePerGas: fees.maxFeePerGas.toString(),
+  maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+});
+
+if (check.policyBreach) {
+  for (const policy of check.rejectedPolicies) console.log(<span class="s">"blocked by"</span>, policy.type, policy.chain);
+}</code></pre></div>
+      <p><code>check.networkPolicies</code> lists every policy that was evaluated. A policy on this chain that's missing from it didn't apply to this transaction, which usually means it doesn't constrain what you're doing.</p>
+
+      <h3>Create policies from code</h3>
+      <div class="code-wrap"><pre class="code"><code>await salt.createAccountPolicy({
+  accountId,
+  organisationId,
+  type: <span class="s">"contract_param_restriction"</span>,
+  chain: <span class="s">"421614"</span>,
+  params: {
+    restrictions: [
+      <span class="c">// USDC approvals may only go to the router, and never above 250 USDC (6 decimals)</span>
+      { contractAddress: USDC, functionSignature: <span class="s">"approve(address,uint256)"</span>, paramIndex: 0, operator: <span class="s">"eq"</span>, value: ROUTER },
+      { contractAddress: USDC, functionSignature: <span class="s">"approve(address,uint256)"</span>, paramIndex: 1, operator: <span class="s">"lte"</span>, value: <span class="s">"250000000"</span> },
+    ],
+  },
+});</code></pre></div>
+
+      <h3>In salt-fi</h3>
+      <ul>
+        <li><strong>Manage policies</strong> is a guided builder for every type you can create, with presets for common contract restrictions.</li>
+        <li><strong>Policy chat</strong> takes plain English, such as "cap USDC approvals at 250 on Arbitrum", proposes the exact policy, and asks before applying it. It needs an API key for the language model that powers it, set in <code>.env</code>.</li>
+        <li><strong>Swap, Bridge and the Hinkal deposit</strong> check their transactions before submitting and show which policies pass or fail.</li>
+      </ul>
+
+      <h3>Not expressible today</h3>
+      <ul>
+        <li>Cumulative or time-window limits, such as a daily cap.</li>
+        <li>Time-based access.</li>
+        <li>Enforced human approvals: <code>nominated_approvers</code> isn't enforced yet.</li>
+        <li>"Either A or B" for one contract argument.</li>
+        <li>Separate allowlists for payees and for contracts. One allowlist covers both.</li>
+      </ul>
+    </section>
+
+    <section id="sdk">
+      <h2>Using the SDK directly</h2>
+      <p><code>salt-sdk</code> is an ES module that uses top-level <code>await</code>, so your <code>package.json</code> needs <code>"type": "module"</code>. It declares Node.js 24 or newer.</p>
+      <div class="code-wrap"><pre class="code"><code>npm install salt-sdk viem</code></pre></div>
+      <div class="code-wrap"><pre class="code"><code>import { Salt, PolicyBreachError } from <span class="s">"salt-sdk"</span>;
+import { createPublicClient, createWalletClient, http, parseEther } from <span class="s">"viem"</span>;
+import { privateKeyToAccount } from <span class="s">"viem/accounts"</span>;
+import { arbitrumSepolia, sepolia } from <span class="s">"viem/chains"</span>;
+
+<span class="c">// Your signer. On testnet, Salt's key-share registry lives on Arbitrum Sepolia;</span>
+<span class="c">// the signer only signs there, and Salt pays the registry gas.</span>
+const walletClient = createWalletClient({
+  account: privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`),
+  chain: arbitrumSepolia,
+  transport: http(),
+});
+
+const salt = new Salt({ environment: <span class="s">"TESTNET"</span>, domain: <span class="s">"testnet.salt.space"</span> });
+await salt.authenticate(walletClient); <span class="c">// SIWE</span>
+
+const [org] = await salt.getOrganisations();
+const [account] = await salt.getAccounts(org.id);
+
+<span class="c">// Send 0.001 ETH on Sepolia. Policies are checked first, and the</span>
+<span class="c">// Robo Guardians co-sign only if every one passes.</span>
+try {
+  const ceremony = await salt.submitTx({
+    accountId: account.id,
+    to: <span class="s">"0x…"</span>,
+    value: parseEther(<span class="s">"0.001"</span>),
+    data: <span class="s">"0x"</span>,
+    chainId: 11155111,
+    userAddress: walletClient.account.address,
+    walletClient,
+    publicClient: createPublicClient({ chain: sepolia, transport: http() }),
+  });
+  const { transaction } = await ceremony.wait();
+  console.log(<span class="s">"broadcast"</span>, transaction.broadcastReceipt?.transactionHash);
+} catch (err) {
+  if (err instanceof PolicyBreachError) console.error(<span class="s">"blocked by"</span>, err.rejectedPolicies.map((p) =&gt; p.type));
+  else throw err;
+}</code></pre></div>
+      <p>The account needs gas on the chain it sends from. On testnet, salt-fi's <strong>Assets → Faucet for Salt accounts</strong> points you at faucets that work for new accounts.</p>
+    </section>
+
+    <section id="next">
+      <h2>Where to go next</h2>
+      <ul>
+        <li><a href="https://docs.salt.space">Salt documentation</a></li>
+        <li><a href="https://developer.salt.space/sdk/">SDK API reference</a></li>
+        <li><a href="https://github.com/salt-space/salt-fi#readme">salt-fi README</a>, which covers setup and every menu item</li>
+        <li><a href="https://github.com/salt-space/salt-fi/tree/main/docs/robo-hosting">Robo Guardian hosting guides</a> for Hostinger and AWS</li>
+        <li><a href="https://github.com/salt-space/salt-fi/blob/main/docs/transaction-stages.md">What each transaction stage means</a></li>
+      </ul>
+      <footer class="end">Everything in this guide runs on testnet. On mainnet, transactions move real funds and can't be reversed, so check every address, amount and policy before you confirm.</footer>
+    </section>
+  </main>
+</div>
+
+{{DATA nara-create-org}}
+{{DATA nara-ssh-setup}}
+{{DATA nara-activate}}
+
+<script>
+(function () {
+  function fmt(s) {
+    s = Math.max(0, Math.round(s));
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  document.querySelectorAll(".rec").forEach(function (fig) {
+    var source = document.getElementById(fig.dataset.src);
+    if (!source) return;
+    var data = JSON.parse(source.textContent);
+    var rows = Array.prototype.slice.call(fig.querySelectorAll(".term .row"));
+    var playBtn = fig.querySelector(".rec-play");
+    var speedBtn = fig.querySelector(".rec-speed");
+    var bar = fig.querySelector(".rec-progress");
+    var fill = bar.querySelector("span");
+    var time = fig.querySelector(".rec-time");
+    var state = "rest", idx = 0, t = 0, speed = 1, last = 0, raf = 0;
+
+    function apply(i) {
+      var diff = data.frames[i][1];
+      for (var k = 0; k < diff.length; k++) rows[diff[k][0]].innerHTML = diff[k][1];
+    }
+    function paint() {
+      var pct = Math.min(100, (t / data.duration) * 100);
+      fill.style.width = pct + "%";
+      bar.setAttribute("aria-valuenow", String(Math.round(pct)));
+      time.textContent = fmt(t) + " / " + fmt(data.duration);
+    }
+    function seek(target) {
+      rows.forEach(function (r) { r.innerHTML = ""; });
+      idx = 0;
+      while (idx < data.frames.length && data.frames[idx][0] <= target) apply(idx++);
+      t = target;
+      paint();
+    }
+    function tick(now) {
+      t += ((now - last) / 1000) * speed;
+      last = now;
+      while (idx < data.frames.length && data.frames[idx][0] <= t) apply(idx++);
+      if (t >= data.duration) {
+        t = data.duration;
+        paint();
+        state = "done";
+        playBtn.textContent = "Replay";
+        return;
+      }
+      paint();
+      raf = requestAnimationFrame(tick);
+    }
+    function play() {
+      if (state === "rest" || state === "done") seek(0);
+      state = "playing";
+      playBtn.textContent = "Pause";
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    }
+    function pause() {
+      cancelAnimationFrame(raf);
+      state = "paused";
+      playBtn.textContent = "Play";
+    }
+    function seekTo(target) {
+      var playing = state === "playing";
+      cancelAnimationFrame(raf);
+      seek(Math.max(0, Math.min(data.duration, target)));
+      if (playing) {
+        last = performance.now();
+        raf = requestAnimationFrame(tick);
+      } else {
+        state = "paused";
+        playBtn.textContent = "Play";
+      }
+    }
+
+    playBtn.addEventListener("click", function () { state === "playing" ? pause() : play(); });
+    speedBtn.addEventListener("click", function () {
+      speed = speed === 1 ? 2 : speed === 2 ? 4 : 1;
+      speedBtn.textContent = speed + "×";
+    });
+    bar.addEventListener("click", function (e) {
+      var r = bar.getBoundingClientRect();
+      seekTo(((e.clientX - r.left) / r.width) * data.duration);
+    });
+    bar.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { e.preventDefault(); seekTo(t + 5); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); seekTo(t - 5); }
+    });
+    time.textContent = fmt(data.duration);
+  });
+
+  // Copy buttons on code blocks.
+  document.querySelectorAll(".code-wrap").forEach(function (wrap) {
+    var code = wrap.querySelector("code");
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", function () {
+      var text = code.innerText;
+      var done = function (label) {
+        btn.textContent = label;
+        setTimeout(function () { btn.textContent = "Copy"; }, 1800);
+      };
+      var selectIt = function () {
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        done("Selected");
+      };
+      try {
+        navigator.clipboard.writeText(text).then(function () { done("Copied"); }, selectIt);
+      } catch (err) {
+        selectIt();
+      }
+    });
+    wrap.appendChild(btn);
+  });
+
+  // Highlight the section in view in the contents rail.
+  var links = {};
+  document.querySelectorAll(".toc a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if ("IntersectionObserver" in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        Object.keys(links).forEach(function (id) { links[id].removeAttribute("aria-current"); });
+        var link = links[entry.target.id];
+        if (link) link.setAttribute("aria-current", "true");
+      });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll("main section").forEach(function (s) { observer.observe(s); });
+  }
+})();
+</script>
