@@ -2,8 +2,6 @@
 
 A mini terminal app to get started with the Salt SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
 
-Salt is in Beta — treat this project as subject to change.
-
 ## Important notice
 
 **salt-fi is an independent open-source project maintained by its author in a personal capacity. It is not an official Salt product and is not part of Salt's supported product offering.**
@@ -99,9 +97,10 @@ You'll need these installed on your machine first:
    npm install
    ```
 3. Copy `.env.example` to `.env` and set:
-   - `PRIVATE_KEY` — a 0x-prefixed private key for any EVM EOA (this is the
-     wallet that signs the SIWE login and, if you use "Create account",
-     co-signs the account's keygen ceremony). You never interact with
+   - `PRIVATE_KEY` — a 0x-prefixed private key for any EVM EOA. This wallet
+     *is* your identity in Salt: it signs you in with SIWE (see
+     [Signing in](#signing-in-your-wallet-is-your-identity)) and, if you use
+     "Create account", co-signs the account's keygen ceremony. You never interact with
      Arbitrum Sepolia directly — that's just the chain hosting Salt's on-chain
      shard registry (where your account's key shards are registered/backed up).
      Salt covers the gas for those registry operations — the signer's wallet
@@ -137,15 +136,44 @@ npm run dev:b   # uses .env.b
 
 These scripts just set `DOTENV_CONFIG_PATH`, which `dotenv/config` (used in
 `src/env.ts`) natively respects to load a file other than `.env`. Both
-terminals still share the same `.salt-session.json` cache, but since it's
-keyed by wallet address, that's not a problem — each identity gets its own
-entry.
+terminals still share the same session cache file, but since it's keyed by
+wallet address, that's not a problem — each identity gets its own entry.
+
+## Signing in: your wallet is your identity
+
+There are no Salt usernames or passwords. salt-fi signs you in with
+**Sign-In with Ethereum (SIWE)**: the app signs a standard login message with
+the wallet from `PRIVATE_KEY`, and Salt verifies the signature and issues a
+session token. Signing happens locally, so the key never leaves your machine.
+Nothing goes on-chain and there's no gas to pay.
+
+That wallet's address is who you are in Salt:
+
+- **Organisations** invite you by address, and you accept with the same
+  wallet. Your access level (owner, member or agent) is attached to that
+  address.
+- **Accounts** you co-sign use this wallet in their MPC key-generation and
+  signing ceremonies.
+- **Backups** are encrypted to this wallet's public key, which Salt recovers
+  from your sign-in signature. That covers your keyshare backups and, if you
+  set up your organisation's Robo Guardians, their seed. Only this wallet can
+  recover them, so back it up like any other key.
+
+Change `PRIVATE_KEY` and you're a different person to Salt, which is how
+[running as two identities](#running-as-two-identities-at-once) works. A
+session is scoped to the environment you picked (`testnet.salt.space` or
+`app.salt.space`) and cached per wallet in `.salt-session.testnet.json` or
+`.salt-session.mainnet.json` (both gitignored), so you don't sign again on
+every launch. The app refreshes the token automatically; if it can't, it
+discards the session and signs you in afresh.
 
 ## Usage
 
 `npm run dev` asks which environment to use, then signs you in with SIWE
 (against that environment's privileged domain — `testnet.salt.space` for
-Testnet, `app.salt.space` for Mainnet) and drops you into an interactive menu.
+Testnet, `app.salt.space` for Mainnet; see
+[Signing in](#signing-in-your-wallet-is-your-identity)) and drops you into an
+interactive menu.
 The launch banner names the environment, and mainnet is flagged with a real-funds
 warning so you always know which network you're on. It's grouped, with a
 guided walkthrough at the top and the individual tools organised into submenus.
@@ -265,10 +293,6 @@ guided walkthrough at the top and the individual tools organised into submenus.
   [`docs/requested-policies.md`](docs/requested-policies.md) for the Salt
   team. Requires an `ANTHROPIC_API_KEY` in `.env` (this is the only feature
   that needs one); powered by Claude via the Anthropic SDK.
-
-The auth token from your first sign-in is cached in `.salt-session.json`
-(gitignored) so you don't have to re-sign a wallet message on every launch;
-it's discarded automatically and you're prompted to restart if it expires.
 
 ## Docs
 
