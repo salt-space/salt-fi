@@ -2,6 +2,10 @@
 
 A mini terminal app to get started with the Salt SDK ([`salt-sdk`](https://www.npmjs.com/package/salt-sdk) on npm).
 
+**New to Salt?** The [Salt SDK Field Guide](https://salt-space.github.io/salt-fi/field-guide/)
+walks through setup, signing in with your wallet, installing Robo Guardians
+with Claude Code over SSH, and the policy layer, with replays of a real setup.
+
 ## Important notice
 
 **salt-fi is an independent open-source project maintained by its author in a personal capacity. It is not an official Salt product and is not part of Salt's supported product offering.**
@@ -296,6 +300,8 @@ guided walkthrough at the top and the individual tools organised into submenus.
 
 ## Docs
 
+- Salt SDK Field Guide: https://salt-space.github.io/salt-fi/field-guide/
+  (source: [`docs/field-guide/`](docs/field-guide/index.html))
 - SDK docs: https://docs.salt.space
 - API reference: https://developer.salt.space/sdk/
 
