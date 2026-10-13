@@ -27,6 +27,19 @@ current docs and package types before relying on anything below long-term.
   Using the wrong domain doesn't necessarily error — it can silently return
   `null` for secrets.
 - The robo credential is surfaced to users as an **OTP (one-time password)**.
+- The SDK only ever asks the signer's `walletClient` for **signatures**:
+  EIP-191 (SIWE, robo activation) and an EIP-712 `DeriveKey` struct (domain
+  `salt.space`) that, through Salt's OPRF, derives the key encrypting that
+  signer's keyshare, once per keygen/signing ceremony. So signatures must be
+  deterministic (RFC 6979). That's why a Ledger works as the signer
+  (`SIGNER=ledger`, `src/ledger.ts`): it's a viem custom account over
+  `@ledgerhq/hw-app-eth`, loaded via `require()` because Ledger's ESM build
+  breaks under Node's ESM loader.
+- Account setup asks for that `DeriveKey` signature only *after* keygen, so a
+  Ledger rejection there would lose the new keyshare. `src/keyshare-backup.ts`
+  collects it before keygen and answers the SDK's request from memory. It copies
+  the SDK-internal struct: re-check `keyshareKeyRequest` when upgrading
+  salt-sdk (the flows warn if the early approval went unused).
 
 ## Network / chain IDs
 

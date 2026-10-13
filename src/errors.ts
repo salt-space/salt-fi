@@ -24,6 +24,19 @@ export function isAuthExpired(err: unknown): boolean {
   return err instanceof InvalidAuthToken || (err instanceof ApiError && err.status === 401);
 }
 
+/**
+ * Whatever an API error's body says beyond its `message` and `code` — e.g. which
+ * field failed validation — on its own line as compact JSON. The message alone
+ * can be as vague as "Invalid payload structure".
+ */
+function apiErrorDetails(body: unknown): string {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return "";
+  const { message: _message, code: _code, ...rest } = body as Record<string, unknown>;
+  if (Object.keys(rest).length === 0) return "";
+  const json = JSON.stringify(rest);
+  return `\n${json.length > 800 ? `${json.slice(0, 800)}…` : json}`;
+}
+
 export function formatSaltError(err: unknown): string {
   if (isAuthExpired(err)) {
     return "Auth token is invalid or expired. You'll need to sign in again.";
@@ -62,7 +75,7 @@ export function formatSaltError(err: unknown): string {
     return `Invalid input: ${err.message}`;
   }
   if (err instanceof ApiError) {
-    return `API error: ${err.message}`;
+    return `API error: ${err.message}${err.code ? ` [${err.code}]` : ""}${apiErrorDetails(err.body)}`;
   }
   if (err instanceof Error) {
     // Node's fetch throws a generic "fetch failed" TypeError for any

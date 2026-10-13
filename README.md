@@ -85,9 +85,10 @@ You'll need these installed on your machine first:
   npm --version
   ```
 - **Git** — to clone this repository ([git-scm.com](https://git-scm.com/)).
-- **An EVM wallet private key** — a 0x-prefixed private key for any Ethereum
-  account (see step 3 below for what it's used for). A throwaway key is fine
-  for testnet; don't reuse one that holds real mainnet funds.
+- **An EVM wallet** — a 0x-prefixed private key for any Ethereum account (see
+  step 3 below for what it's used for), or a Ledger (see
+  [Signing with a Ledger](#signing-with-a-ledger)). A throwaway key is fine for
+  testnet; don't reuse one that holds real mainnet funds.
 
 ## Setup
 
@@ -110,6 +111,8 @@ You'll need these installed on your machine first:
      Salt covers the gas for those registry operations — the signer's wallet
      never pays gas; the accounts you create/hold assets in can live on many
      other supported testnets.
+   - Or, to keep that key on a Ledger instead, set `SIGNER=ledger` and leave
+     `PRIVATE_KEY` out — see [Signing with a Ledger](#signing-with-a-ledger).
 
    > ⚠️ **Mainnet security:** Use a dedicated signer/account with only the permissions and funds required for what you are doing. Do not paste the private key of a wallet holding significant assets into an unfamiliar environment, shared machine, shell history, source file or committed `.env` file.
 
@@ -125,21 +128,27 @@ You'll need these installed on your machine first:
    directly with `npm run dev:testnet` or `npm run dev:mainnet` (these also
    accept `SALT_ENV=testnet|mainnet` in your `.env`).
 
-### Running as two identities at once
+### Running several identities at once
 
-Testing things like "Invite member" or "Listen for nudges" needs two signer
-identities running at the same time — a single shared `.env` won't do it,
-since editing it in one terminal changes the key the other terminal picks up
-too. Instead, copy `.env.example` to `.env.a` and `.env.b` (both gitignored),
-put a different `PRIVATE_KEY` in each, and run one identity per terminal:
+Testing things like "Invite member" or "Listen for nudges" needs more than one
+signer identity running at the same time (a three-signer account needs three).
+A single shared `.env` won't do it, since editing it in one terminal changes
+the key the other terminals pick up too. Instead, copy `.env.example` to
+`.env.a`, `.env.b`, `.env.c` and `.env.d` (all gitignored), put a different
+`PRIVATE_KEY` in each, and run one identity per terminal:
 
 ```
 npm run dev:a   # uses .env.a
 npm run dev:b   # uses .env.b
+npm run dev:c   # uses .env.c
+npm run dev:d   # uses .env.d
 ```
 
 These scripts just set `DOTENV_CONFIG_PATH`, which `dotenv/config` (used in
-`src/env.ts`) natively respects to load a file other than `.env`. Both
+`src/env.ts`) natively respects to load a file other than `.env`. Any other
+`.env.<name>` works the same way: `DOTENV_CONFIG_PATH=.env.<name> npm run dev`.
+A profile can also set `SALT_ENV`, or `SIGNER=ledger`, though only one terminal
+can use a given Ledger at a time. Both
 terminals still share the same session cache file, but since it's keyed by
 wallet address, that's not a problem — each identity gets its own entry.
 
@@ -147,8 +156,9 @@ wallet address, that's not a problem — each identity gets its own entry.
 
 There are no Salt usernames or passwords. salt-fi signs you in with
 **Sign-In with Ethereum (SIWE)**: the app signs a standard login message with
-the wallet from `PRIVATE_KEY`, and Salt verifies the signature and issues a
-session token. Signing happens locally, so the key never leaves your machine.
+your wallet (the key in `PRIVATE_KEY`, or your Ledger), and Salt verifies the
+signature and issues a session token. Signing happens locally, so the key never
+leaves your machine (or, with a Ledger, the device).
 Nothing goes on-chain and there's no gas to pay.
 
 That wallet's address is who you are in Salt:
@@ -164,12 +174,62 @@ That wallet's address is who you are in Salt:
   recover them, so back it up like any other key.
 
 Change `PRIVATE_KEY` and you're a different person to Salt, which is how
-[running as two identities](#running-as-two-identities-at-once) works. A
+[running several identities](#running-several-identities-at-once) works. A
 session is scoped to the environment you picked (`testnet.salt.space` or
 `app.salt.space`) and cached per wallet in `.salt-session.testnet.json` or
 `.salt-session.mainnet.json` (both gitignored), so you don't sign again on
 every launch. The app refreshes the token automatically; if it can't, it
 discards the session and signs you in afresh.
+
+## Signing with a Ledger
+
+Your signer key can live on a Ledger instead of in `.env`. The Salt SDK only
+ever asks your wallet for signatures, never for the key itself: the sign-in
+message, Robo Guardian activation, and a typed message that unlocks your
+keyshare in each account ceremony. The device can sign all of these.
+
+1. Install the **Ethereum** app on your Ledger (Nano S Plus, Nano X, Stax or
+   Flex) with Ledger Live, then **quit Ledger Live**, because it holds onto the
+   USB connection. The original Nano S also works, but it can only show you
+   hashes for typed messages.
+2. In `.env`, set `SIGNER=ledger`. It signs with Ledger Live's first Ethereum
+   account by default; set `LEDGER_PATH` to use another (Ledger Live's account
+   N is `44'/60'/N'/0/0`). On Linux, install
+   [Ledger's udev rules](https://github.com/LedgerHQ/udev-rules) first.
+3. Plug in the Ledger, unlock it, open the Ethereum app and run `npm run dev`.
+
+If your Ledger drops off USB mid-session, the app waits up to a minute for you
+to reconnect it. If it keeps dropping, try another cable: the app can only see
+what your computer sees. Run with `LEDGER_DEBUG=1` to print the USB connection
+events (never what's being signed).
+
+What to expect:
+
+- **You confirm on the device** when you sign in, unless your saved session is
+  still valid ("Signed in as … (saved session)" means no signature was needed;
+  the app only read your address from the device). You also confirm once for
+  each account ceremony: creating an account, sending, swapping, bridging, signing a
+  message, and so on. "Verify account backup" runs two ceremonies, so it asks
+  twice. The ceremony prompt is a typed
+  message from `salt.space` with the action `derive-key`. Confirm it promptly,
+  because the other signers are waiting in the ceremony.
+- **Creating or joining an account asks first.** The SDK needs that prompt to
+  back up your share of the new account's key, which normally happens after the
+  key is generated. salt-fi asks for it before key generation instead, so
+  rejecting it stops the setup with nothing generated, rather than losing your
+  share.
+- **Nudges need you at the device.** "Listen for account nudges" joins
+  ceremonies for you, but each one still waits for a confirmation on the
+  Ledger, so it won't co-sign unattended.
+- **A Ledger is a new identity.** Its address differs from your `PRIVATE_KEY`
+  wallet's, so it starts with no organisations or accounts. Invite it into
+  your organisation, then create accounts with it as a signer. Accounts your old
+  key co-signs stay tied to that key.
+- **Robo Guardian seed backups** are encrypted to your signer's public key
+  (see [Signing in](#signing-in-your-wallet-is-your-identity)). salt-fi never
+  decrypts them, and a Ledger can sign but won't decrypt. If you set up Robo
+  Guardians as a Ledger owner, recovering that seed yourself would need your
+  Ledger's recovery phrase in a software wallet.
 
 ## Usage
 

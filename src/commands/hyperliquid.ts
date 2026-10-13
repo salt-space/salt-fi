@@ -162,9 +162,9 @@ const PRIVATE_KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
  *
  * Skips the prompt entirely when the approved agent *is* the account's own already-authenticated
  * wallet (a common setup for testing: approving your existing signing wallet as the agent instead
- * of generating a separate EOA) — `walletClient.account` already holds that key in-process
- * (`createSaltWalletClient` builds it via `privateKeyToAccount`), so there's nothing left to ask
- * for.
+ * of generating a separate EOA) — `walletClient.account` can already sign as that address
+ * (in-process from PRIVATE_KEY, or on the Ledger with a confirmation per order), so there's
+ * nothing left to ask for.
  */
 export async function resolveAgentKeySigner(accountId: string, expectedAgentAddress: Address, walletClient: SaltWalletClient): Promise<L1ActionSigner | undefined> {
   const cached = agentSignerCache.get(accountId);

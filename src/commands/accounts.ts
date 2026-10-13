@@ -2,9 +2,11 @@ import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { backupStatusLabel, verifyKeyshareBackup } from "../backup-status.js";
 import { reportError } from "../errors.js";
+import { approvingMessage, keyshareBackupSigner, UNUSED_APPROVAL_WARNING } from "../keyshare-backup.js";
+import { findLedgerError } from "../ledger.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList, select } from "../prompts.js";
 import { ensureSignerPublicKey } from "../session.js";
-import type { SaltWalletClient } from "../wallet.js";
+import { ensureSignerReachable, type SaltWalletClient } from "../wallet.js";
 
 export async function listAccounts(salt: Salt): Promise<void> {
   const organisationId = await pickOrganisation(salt, "List accounts for which organisation?");
@@ -32,6 +34,17 @@ export async function listAccounts(salt: Salt): Promise<void> {
     s.stop("Failed to fetch accounts");
     reportError(err);
   }
+}
+
+/**
+ * What an account with `humans` human signers adds up to. Salt adds one Robo
+ * Guardian fewer than the humans, and the threshold is the number of humans
+ * (docs.salt.space, Accounts → Account configurations).
+ */
+export function describeConfiguration(humans: number): string {
+  if (humans < 2 || humans > 4) return `${humans} human signers isn't a supported configuration (2 to 4, including you).`;
+  const robos = humans - 1;
+  return `+ ${robos} Robo Guardian${robos === 1 ? "" : "s"}: ${humans} of ${humans + robos} must sign`;
 }
 
 /** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
@@ -71,10 +84,11 @@ export async function createAccountFlow(
   if (otherActiveMembers.length === 0) {
     p.log.info("No other active collaborators in this organisation to add as co-signers.");
   } else {
+    // Nothing pre-ticked: each co-signer changes the account's configuration
+    // (see describeConfiguration), so every one should be a deliberate choice.
     const selected = await p.multiselect({
-      message: "Select additional co-signers (optional)",
-      required: false,
-      initialValues: [otherActiveMembers[0].address],
+      message: "Co-signers (space to tick, enter to confirm)",
+      required: true,
       options: otherActiveMembers.map((member) => ({
         value: member.address,
         label: member.name || member.address,
@@ -87,28 +101,43 @@ export async function createAccountFlow(
 
   const signers = [selfAddress, ...extraSigners];
 
+  const signerNames = signers.map((address) =>
+    address === selfAddress ? `You (${address})` : `${memberNameByAddress.get(address.toLowerCase()) ?? address} (${address})`,
+  );
   const confirmed = await p.confirm({
-    message: `Create account "${name}" with signers:\n  ${signers.join("\n  ")}`,
+    message: `Create account "${name}"?\n  ${signerNames.join("\n  ")}\n  ${describeConfiguration(signers.length)}`,
   });
   if (p.isCancel(confirmed) || !confirmed) return;
 
-  // Account creation backs up a keyshare, which needs the signer's public key. That key
-  // is recovered during a live `authenticate()` and kept in memory on this Salt instance
-  // — it is NOT carried by a session restored from a cached auth token. So re-authenticate
-  // here if needed, otherwise the backup step fails with
+  // Account creation backs up a keyshare, which needs the signer's public key. salt-sdk
+  // 0.0.43 reads it from the session token, but older sessions may not carry it, so
+  // re-authenticate if it's missing; otherwise the backup step fails with
   // "Cannot back up a keyshare without the owner public key".
   await ensureSignerPublicKey(salt, walletClient);
 
+  const backup = keyshareBackupSigner(walletClient);
   const s = p.spinner();
   s.start("Starting account creation ceremony");
   let renudge: ReturnType<typeof setInterval> | undefined;
+  let accountId: string | undefined;
+  let keygenStarted = false;
   try {
+    // Check the Ledger is there before Salt creates the account record: once that
+    // exists it can't be deleted, and a missing device would leave it unfinished.
+    await ensureSignerReachable();
     const ceremony = await salt.createAccount({
       name,
       organisationId,
       signers,
-      signer: walletClient,
+      signer: backup.walletClient,
     });
+    accountId = ceremony.accountId;
+
+    // Approve this signer's keyshare backup now, before keygen. The SDK only asks
+    // for it once keygen has made the new keyshare, and rejecting it then on a
+    // Ledger would throw that keyshare away (see keyshare-backup.ts).
+    s.message(approvingMessage());
+    await backup.approve(accountId);
 
     let allPresent = false;
     ceremony.on("presence", (event) => {
@@ -144,7 +173,9 @@ export async function createAccountFlow(
       }
     }, 15_000);
 
+    keygenStarted = true;
     const { account } = await ceremony.wait();
+    const approvalUsed = backup.release(accountId);
     // publicKey/evmAddress can lag the ceremony result by a moment (the account is
     // created — it has an id — but finalization propagates a beat later). Poll getAccounts
     // until it's finalized so we display the real address instead of `undefined`/`null`.
@@ -158,9 +189,19 @@ export async function createAccountFlow(
     p.log.success(
       `${finalized.name}  (${finalized.id})\n  address: ${finalized.evmAddress ?? "(finalizing…)"}\n  public key: ${finalized.publicKey ?? "(finalizing…)"}\n  backup: ${backupStatusLabel(finalized)}`,
     );
+    if (!approvalUsed) p.log.warn(UNUSED_APPROVAL_WARNING);
   } catch (err) {
-    s.stop("Account creation failed");
-    reportError(err);
+    if (accountId && !keygenStarted && findLedgerError(err)) {
+      s.stop("Account creation stopped before keygen — no keys were generated");
+      reportError(err);
+      p.log.info(
+        "Salt keeps the unfinished account record, and your co-signers were already nudged, " +
+          "so they may see a setup that never completes. Run Create account again when you're ready.",
+      );
+    } else {
+      s.stop("Account creation failed");
+      reportError(err);
+    }
   } finally {
     if (renudge) clearInterval(renudge);
   }

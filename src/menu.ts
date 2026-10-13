@@ -34,6 +34,7 @@ import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
 import { network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
+import { findLedgerError } from "./ledger.js";
 import { select } from "./prompts.js";
 import { clearStoredSession } from "./session.js";
 import type { SaltWalletClient } from "./wallet.js";
@@ -57,6 +58,12 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         clearStoredSession(selfAddress);
         p.log.error("Your session expired. Please restart the app to sign in again.");
         return "exit-app";
+      }
+      // Rejecting on the Ledger (or finding it locked) ends this action, not the app.
+      const ledgerError = findLedgerError(err);
+      if (ledgerError) {
+        p.log.error(ledgerError.message);
+        return "ok";
       }
       throw err;
     }

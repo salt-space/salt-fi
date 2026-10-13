@@ -59,7 +59,30 @@ export const network: SaltNetwork = (() => {
   return { saltEnv, ...NETWORKS[saltEnv] };
 })();
 
+/** Where the signer's key lives: a raw key in PRIVATE_KEY, or on a Ledger over USB. */
+export type SignerKind = "private-key" | "ledger";
+
+/** Ledger Live's first Ethereum account. Ledger Live's account N is `44'/60'/N'/0/0`. */
+const DEFAULT_LEDGER_PATH = "44'/60'/0'/0/0";
+
 export const env = {
+  get signer(): SignerKind {
+    const raw = (process.env.SIGNER ?? "private-key").toLowerCase();
+    if (raw === "private-key" || raw === "ledger") return raw;
+    throw new Error(`Invalid SIGNER "${process.env.SIGNER}". Expected one of: private-key, ledger (see .env.example)`);
+  },
+  /** BIP-32 derivation path of the Ledger account to sign with. */
+  get ledgerPath(): string {
+    const path = process.env.LEDGER_PATH || DEFAULT_LEDGER_PATH;
+    if (!/^(m\/)?\d+'?(\/\d+'?)*$/.test(path)) {
+      throw new Error(`Invalid LEDGER_PATH "${path}". Expected a derivation path like ${DEFAULT_LEDGER_PATH}`);
+    }
+    return path;
+  },
+  /** LEDGER_DEBUG=1 prints Ledger USB connection events to stderr. */
+  get ledgerDebug(): boolean {
+    return process.env.LEDGER_DEBUG === "1";
+  },
   get privateKey(): `0x${string}` {
     const key = requireEnv("PRIVATE_KEY");
     if (!key.startsWith("0x")) {

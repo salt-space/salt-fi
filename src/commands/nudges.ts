@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
 import { formatSaltError, reportError } from "../errors.js";
+import { approvingMessage, keyshareBackupSigner, UNUSED_APPROVAL_WARNING } from "../keyshare-backup.js";
 import { ensureSignerPublicKey } from "../session.js";
 import type { SaltWalletClient } from "../wallet.js";
 
@@ -17,6 +18,8 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
   // with "Cannot back up a keyshare without the owner public key".
   await ensureSignerPublicKey(salt, walletClient);
 
+  // Lets each keygen nudge's keyshare backup be approved before joining (see below).
+  const backup = keyshareBackupSigner(walletClient);
   let listener;
   try {
     // autoJoin: false + manual join() so we get the real AccountCeremony for
@@ -26,7 +29,7 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
     // sees nothing between "nudge received" and (if it ever fires) done,
     // which reads as the app never confirming the account was finished.
     listener = await salt.listenToAccountNudges({
-      signer: walletClient,
+      signer: backup.walletClient,
       autoJoin: false,
       resolveAccount: true,
     });
@@ -38,8 +41,20 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
   listener.on("nudgeReceived", async (event) => {
     if (event.kind === "keygen") {
       p.log.step(`Nudge received from ${event.nudge.from} — joining account setup...`);
+      const { accountId } = event.nudge;
       const s = p.spinner();
-      s.start("Joining account setup ceremony");
+      // Approve this signer's keyshare backup before joining. The SDK only asks for
+      // it once keygen has made the new keyshare, and rejecting it then on a Ledger
+      // would throw that keyshare away (see keyshare-backup.ts).
+      s.start(approvingMessage());
+      try {
+        await backup.approve(accountId);
+      } catch (err) {
+        s.stop("Didn't join account setup — no keys were generated");
+        p.log.error(formatSaltError(err));
+        return;
+      }
+      s.message("Joining account setup ceremony");
       try {
         const ceremony = await event.join();
         ceremony.on("presence", (e) => {
@@ -56,6 +71,7 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
         });
 
         const result = await ceremony.wait();
+        const approvalUsed = backup.release(accountId);
         if (result?.account) {
           s.stop("Account setup complete");
           p.log.success(
@@ -65,7 +81,9 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
           s.stop("Account setup complete");
           p.log.success("Joined account setup (account details weren't available to this signer).");
         }
+        if (!approvalUsed) p.log.warn(UNUSED_APPROVAL_WARNING);
       } catch (err) {
+        backup.release(accountId);
         s.stop("Account setup failed");
         p.log.error(`Failed to join account setup: ${formatSaltError(err)}`);
       }
