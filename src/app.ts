@@ -55,9 +55,7 @@ async function signIn(onLedger: boolean): Promise<{ salt: Salt; walletClient: Sa
     s.start(`Signing in to ${network.label}${onLedger ? " (confirm on your Ledger if it asks)" : ""}`);
     try {
       walletClient ??= await createSaltWalletClient();
-      const salt = await loadSalt(walletClient);
-      // Only a live sign-in recovers the public key; a saved session skips the signature.
-      const savedSession = !salt.userPublicKey;
+      const { salt, savedSession } = await loadSalt(walletClient);
       s.stop(`Signed in as ${walletClient.account.address} · ${network.label}${savedSession ? " (saved session)" : ""}`);
       return { salt, walletClient };
     } catch (err) {

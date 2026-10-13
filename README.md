@@ -199,10 +199,8 @@ What to expect:
 
 - **You confirm on the device** when you sign in, unless your saved session is
   still valid ("Signed in as … (saved session)" means no signature was needed;
-  the app only read your address from the device). Creating an account or
-  listening for nudges then signs you in again first, because a saved session
-  doesn't carry your public key. You also confirm once for each account
-  ceremony: creating an account, sending, swapping, bridging, signing a
+  the app only read your address from the device). You also confirm once for
+  each account ceremony: creating an account, sending, swapping, bridging, signing a
   message, and so on. "Verify account backup" runs two ceremonies, so it asks
   twice. The ceremony prompt is a typed
   message from `salt.space` with the action `derive-key`. Confirm it promptly,

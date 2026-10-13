@@ -182,6 +182,8 @@ export function deviceConnection(
   };
 }
 
+let tracing = false;
+
 /**
  * The first Ledger on USB. With `debug`, connection events go to stderr: the
  * transport's own traces, minus APDUs (they carry what's being signed and the
@@ -204,7 +206,8 @@ export function usbConnection({ debug = false }: { debug?: boolean } = {}): Ledg
   // Resolve the transport's own copies of node-hid and @ledgerhq/logs: the logs
   // package keeps its subscribers per copy.
   const transportRequire = createRequire(require.resolve("@ledgerhq/hw-transport-node-hid-noevents"));
-  if (log) {
+  if (log && !tracing) {
+    tracing = true; // once per process, though sign-in may retry and reconnect
     const logs = createRequire(transportRequire.resolve("@ledgerhq/hw-transport"))("@ledgerhq/logs") as {
       listen: (cb: (entry: { type: string; message?: string }) => void) => void;
     };
