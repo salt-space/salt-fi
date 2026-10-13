@@ -128,21 +128,27 @@ You'll need these installed on your machine first:
    directly with `npm run dev:testnet` or `npm run dev:mainnet` (these also
    accept `SALT_ENV=testnet|mainnet` in your `.env`).
 
-### Running as two identities at once
+### Running several identities at once
 
-Testing things like "Invite member" or "Listen for nudges" needs two signer
-identities running at the same time — a single shared `.env` won't do it,
-since editing it in one terminal changes the key the other terminal picks up
-too. Instead, copy `.env.example` to `.env.a` and `.env.b` (both gitignored),
-put a different `PRIVATE_KEY` in each, and run one identity per terminal:
+Testing things like "Invite member" or "Listen for nudges" needs more than one
+signer identity running at the same time (a three-signer account needs three).
+A single shared `.env` won't do it, since editing it in one terminal changes
+the key the other terminals pick up too. Instead, copy `.env.example` to
+`.env.a`, `.env.b`, `.env.c` and `.env.d` (all gitignored), put a different
+`PRIVATE_KEY` in each, and run one identity per terminal:
 
 ```
 npm run dev:a   # uses .env.a
 npm run dev:b   # uses .env.b
+npm run dev:c   # uses .env.c
+npm run dev:d   # uses .env.d
 ```
 
 These scripts just set `DOTENV_CONFIG_PATH`, which `dotenv/config` (used in
-`src/env.ts`) natively respects to load a file other than `.env`. Both
+`src/env.ts`) natively respects to load a file other than `.env`. Any other
+`.env.<name>` works the same way: `DOTENV_CONFIG_PATH=.env.<name> npm run dev`.
+A profile can also set `SALT_ENV`, or `SIGNER=ledger`, though only one terminal
+can use a given Ledger at a time. Both
 terminals still share the same session cache file, but since it's keyed by
 wallet address, that's not a problem — each identity gets its own entry.
 
@@ -168,7 +174,7 @@ That wallet's address is who you are in Salt:
   recover them, so back it up like any other key.
 
 Change `PRIVATE_KEY` and you're a different person to Salt, which is how
-[running as two identities](#running-as-two-identities-at-once) works. A
+[running several identities](#running-several-identities-at-once) works. A
 session is scoped to the environment you picked (`testnet.salt.space` or
 `app.salt.space`) and cached per wallet in `.salt-session.testnet.json` or
 `.salt-session.mainnet.json` (both gitignored), so you don't sign again on
