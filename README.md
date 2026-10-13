@@ -192,8 +192,10 @@ keyshare in each account ceremony. The device can sign all of these.
    [Ledger's udev rules](https://github.com/LedgerHQ/udev-rules) first.
 3. Plug in the Ledger, unlock it, open the Ethereum app and run `npm run dev`.
 
-If the app loses track of your Ledger, run it with `LEDGER_DEBUG=1` to print
-the USB connection events (never what's being signed).
+If your Ledger drops off USB mid-session, the app waits up to a minute for you
+to reconnect it. If it keeps dropping, try another cable: the app can only see
+what your computer sees. Run with `LEDGER_DEBUG=1` to print the USB connection
+events (never what's being signed).
 
 What to expect:
 

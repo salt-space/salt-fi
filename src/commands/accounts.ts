@@ -6,7 +6,7 @@ import { approvingMessage, keyshareBackupSigner, UNUSED_APPROVAL_WARNING } from 
 import { findLedgerError } from "../ledger.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList, select } from "../prompts.js";
 import { ensureSignerPublicKey } from "../session.js";
-import type { SaltWalletClient } from "../wallet.js";
+import { ensureSignerReachable, type SaltWalletClient } from "../wallet.js";
 
 export async function listAccounts(salt: Salt): Promise<void> {
   const organisationId = await pickOrganisation(salt, "List accounts for which organisation?");
@@ -122,6 +122,9 @@ export async function createAccountFlow(
   let accountId: string | undefined;
   let keygenStarted = false;
   try {
+    // Check the Ledger is there before Salt creates the account record: once that
+    // exists it can't be deleted, and a missing device would leave it unfinished.
+    await ensureSignerReachable();
     const ceremony = await salt.createAccount({
       name,
       organisationId,

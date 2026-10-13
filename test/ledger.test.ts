@@ -221,12 +221,14 @@ describe("deviceConnection", () => {
     return { openDevice, opens: () => opens };
   }
 
-  it("keeps looking for a Ledger that dropped off USB mid-session", async () => {
+  it("keeps looking for a Ledger that dropped off USB mid-session, saying so once", async () => {
     const usb = flakyUsb({ absentFor: 2 });
-    const connection = deviceConnection(usb.openDevice, { reconnectWaitMs: 1_000, pollMs: 1 });
+    let notices = 0;
+    const connection = deviceConnection(usb.openDevice, { reconnectWaitMs: 1_000, pollMs: 1, onWaiting: () => notices++ });
     await connection((eth) => eth.getAddress(PATH));
     expect((await connection((eth) => eth.getAddress(PATH))).address).toBe("0x4");
     expect(usb.opens()).toBe(4);
+    expect(notices).toBe(1);
   });
 
   it("gives up on a Ledger that doesn't come back, saying it was lost", async () => {

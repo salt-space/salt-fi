@@ -109,6 +109,8 @@ export interface DeviceConnectionOptions {
   pollMs?: number;
   /** Where to report connection events (LEDGER_DEBUG). */
   debug?: (message: string) => void;
+  /** Called once each time a lost Ledger is being waited for, to tell the person. */
+  onWaiting?: () => void;
 }
 
 /**
@@ -118,7 +120,7 @@ export interface DeviceConnectionOptions {
  */
 export function deviceConnection(
   openDevice: () => Promise<LedgerDevice>,
-  { reconnectWaitMs = 10_000, pollMs = 500, debug }: DeviceConnectionOptions = {},
+  { reconnectWaitMs = 60_000, pollMs = 500, debug, onWaiting }: DeviceConnectionOptions = {},
 ): LedgerConnection {
   let device: LedgerDevice | undefined;
   let connectedBefore = false;
@@ -127,6 +129,7 @@ export function deviceConnection(
   // once it's been connected, keep looking for a while before giving up on it.
   const reconnect = async (): Promise<LedgerDevice> => {
     const deadline = Date.now() + reconnectWaitMs;
+    let waiting = false;
     for (;;) {
       try {
         return await openDevice();
@@ -135,12 +138,14 @@ export function deviceConnection(
         if (Date.now() >= deadline) {
           throw new LedgerError(
             `Lost your Ledger: it stopped showing up over USB and didn't come back within ${reconnectWaitMs / 1000}s. ` +
-              "Check it's plugged in, unlocked and in the Ethereum app, and that Ledger Live is closed, then try again.",
+              "Check it's plugged in (a loose cable can drop it), unlocked and in the Ethereum app, and that Ledger Live is closed, then try again.",
             false,
             { cause: err },
           );
         }
         debug?.("No Ledger on USB right now; waiting for it to come back");
+        if (!waiting) onWaiting?.();
+        waiting = true;
         await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
     }
@@ -189,7 +194,10 @@ let tracing = false;
  * transport's own traces, minus APDUs (they carry what's being signed and the
  * signatures), plus which Ledger USB interfaces are visible when none matches.
  */
-export function usbConnection({ debug = false }: { debug?: boolean } = {}): LedgerConnection {
+export function usbConnection({
+  debug = false,
+  onWaiting,
+}: { debug?: boolean; onWaiting?: () => void } = {}): LedgerConnection {
   let Eth: EthAppClass;
   let Transport: TransportClass;
   try {
@@ -237,7 +245,7 @@ export function usbConnection({ debug = false }: { debug?: boolean } = {}): Ledg
         throw err;
       }
     },
-    { debug: log },
+    { debug: log, onWaiting },
   );
 }
 
