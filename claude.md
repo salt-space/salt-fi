@@ -35,6 +35,11 @@ current docs and package types before relying on anything below long-term.
   (`SIGNER=ledger`, `src/ledger.ts`): it's a viem custom account over
   `@ledgerhq/hw-app-eth`, loaded via `require()` because Ledger's ESM build
   breaks under Node's ESM loader.
+- Account setup asks for that `DeriveKey` signature only *after* keygen, so a
+  Ledger rejection there would lose the new keyshare. `src/keyshare-backup.ts`
+  collects it before keygen and answers the SDK's request from memory. It copies
+  the SDK-internal struct: re-check `keyshareKeyRequest` when upgrading
+  salt-sdk (the flows warn if the early approval went unused).
 
 ## Network / chain IDs
 

@@ -200,6 +200,11 @@ What to expect:
   backup" runs two ceremonies, so it asks twice. The ceremony prompt is a typed
   message from `salt.space` with the action `derive-key`. Confirm it promptly,
   because the other signers are waiting in the ceremony.
+- **Creating or joining an account asks first.** The SDK needs that prompt to
+  back up your share of the new account's key, which normally happens after the
+  key is generated. salt-fi asks for it before key generation instead, so
+  rejecting it stops the setup with nothing generated, rather than losing your
+  share.
 - **Nudges need you at the device.** "Listen for account nudges" joins
   ceremonies for you, but each one still waits for a confirmation on the
   Ledger, so it won't co-sign unattended.
