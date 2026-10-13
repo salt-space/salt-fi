@@ -1,6 +1,7 @@
 import { createWalletClient, http, serializeSignature, toHex, type Hex, type LocalAccount } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, network } from "./env.js";
+import { ledgerAccount } from "./ledger.js";
 
 /**
  * The signer's wallet, keyed by `SIGNER`: a raw key from PRIVATE_KEY, or a Ledger.
@@ -10,7 +11,7 @@ import { env, network } from "./env.js";
 export async function createSaltWalletClient() {
   const account: LocalAccount =
     env.signer === "ledger"
-      ? await (await import("./ledger.js")).ledgerAccount(env.ledgerPath)
+      ? await ledgerAccount(env.ledgerPath)
       : privateKeyToAccount(env.privateKey);
   return createWalletClient({
     account,

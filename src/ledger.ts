@@ -42,26 +42,50 @@ const STATUS = {
 const isDisconnect = (err: unknown): boolean =>
   ["DisconnectedDevice", "DisconnectedDeviceDuringOperation"].includes((err as { name?: string }).name ?? "");
 
+/**
+ * Something the person did or can fix at the device: rejected the request there
+ * (`rejected`), or the Ledger is locked, unplugged or not in the Ethereum app.
+ */
+export class LedgerError extends Error {
+  constructor(
+    message: string,
+    readonly rejected: boolean,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "LedgerError";
+  }
+}
+
+/** The {@link LedgerError} behind `err`, if any — the SDK may wrap it in its own error. */
+export function findLedgerError(err: unknown): LedgerError | undefined {
+  for (let e = err; e instanceof Error; e = e.cause) {
+    if (e instanceof LedgerError) return e;
+  }
+  return undefined;
+}
+
 /** Turn a Ledger transport/status error into one that says what to do about it. */
 function explain(err: unknown): Error {
   const e = err as { statusCode?: number; name?: string; id?: string };
   const openApp = "unlock it and open the Ethereum app, then try again.";
+  const fixable = (message: string) => new LedgerError(message, false, { cause: err });
   switch (e.statusCode) {
     case STATUS.CONDITIONS_OF_USE_NOT_SATISFIED:
     case STATUS.USER_REFUSED_ON_DEVICE:
-      return new Error("Rejected on the Ledger.", { cause: err });
+      return new LedgerError("Rejected on the Ledger.", true, { cause: err });
     case STATUS.LOCKED_DEVICE:
-      return new Error(`Your Ledger is locked — ${openApp}`, { cause: err });
+      return fixable(`Your Ledger is locked — ${openApp}`);
     case STATUS.APP_NOT_OPEN:
     case STATUS.CLA_NOT_SUPPORTED:
-      return new Error(`The Ethereum app isn't open on your Ledger — ${openApp}`, { cause: err });
+      return fixable(`The Ethereum app isn't open on your Ledger — ${openApp}`);
     case STATUS.INS_NOT_SUPPORTED:
-      return new Error(`Your Ledger's Ethereum app isn't open or needs updating in Ledger Live — ${openApp}`, { cause: err });
+      return fixable(`Your Ledger's Ethereum app isn't open or needs updating in Ledger Live — ${openApp}`);
   }
-  if (e.id === "NoDevice") return new Error(`No Ledger found over USB. Plug it in, ${openApp}`, { cause: err });
-  if (isDisconnect(err)) return new Error(`Lost the connection to your Ledger. Reconnect it, ${openApp}`, { cause: err });
+  if (e.id === "NoDevice") return fixable(`No Ledger found over USB. Plug it in, ${openApp}`);
+  if (isDisconnect(err)) return fixable(`Lost the connection to your Ledger. Reconnect it, ${openApp}`);
   if (e.name === "TransportRaceCondition") {
-    return new Error("Your Ledger is busy with another request. Finish or reject it on the device, then try again.", { cause: err });
+    return fixable("Your Ledger is busy with another request. Finish or reject it on the device, then try again.");
   }
   return err instanceof Error ? err : new Error(String(err));
 }

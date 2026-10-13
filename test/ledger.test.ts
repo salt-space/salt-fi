@@ -1,7 +1,14 @@
 import { concat, hashMessage, hashTypedData, keccak256, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 import { describe, expect, it } from "vitest";
-import { deviceConnection, ledgerAccount, type LedgerConnection, type LedgerEthApp } from "../src/ledger.js";
+import {
+  deviceConnection,
+  findLedgerError,
+  LedgerError,
+  ledgerAccount,
+  type LedgerConnection,
+  type LedgerEthApp,
+} from "../src/ledger.js";
 
 const PATH = "44'/60'/0'/0/0";
 
@@ -158,21 +165,34 @@ describe("deviceConnection", () => {
   });
 
   it.each([
-    [statusError(0x6985), /Rejected on the Ledger/],
-    [statusError(0x5515), /locked/],
-    [statusError(0x6511), /Ethereum app isn't open/],
-    [statusError(0x6e00), /Ethereum app isn't open/],
-    [Object.assign(new Error("NoDevice"), { id: "NoDevice" }), /No Ledger found/],
-  ])("explains %s", async (error, message) => {
+    [statusError(0x6985), /Rejected on the Ledger/, true],
+    [statusError(0x5515), /locked/, false],
+    [statusError(0x6511), /Ethereum app isn't open/, false],
+    [statusError(0x6e00), /Ethereum app isn't open/, false],
+    [Object.assign(new Error("NoDevice"), { id: "NoDevice" }), /No Ledger found/, false],
+  ])("explains %s", async (error, message, rejected) => {
     const connection = deviceConnection(async () => ({
       eth: ethWith(async () => {
         throw error;
       }),
       transport: { disconnected: false, close: async () => {} },
     }));
-    await expect(connection((eth) => eth.getAddress(PATH))).rejects.toThrow(message);
+    const failure = await connection((eth) => eth.getAddress(PATH)).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(LedgerError);
+    expect(failure).toMatchObject({ message: expect.stringMatching(message), rejected });
     // A failed request doesn't wedge the queue.
     await expect(connection((eth) => eth.getAddress(PATH))).rejects.toThrow(message);
+  });
+
+  it("passes unrecognised errors through as they are", async () => {
+    const original = new Error("something else");
+    const connection = deviceConnection(async () => ({
+      eth: ethWith(async () => {
+        throw original;
+      }),
+      transport: { disconnected: false, close: async () => {} },
+    }));
+    await expect(connection((eth) => eth.getAddress(PATH))).rejects.toBe(original);
   });
 
   it("explains a failure to open the device", async () => {
@@ -180,5 +200,19 @@ describe("deviceConnection", () => {
       throw Object.assign(new Error("NoDevice"), { id: "NoDevice" });
     });
     await expect(connection((eth) => eth.getAddress(PATH))).rejects.toThrow(/No Ledger found over USB/);
+  });
+});
+
+describe("findLedgerError", () => {
+  it("finds a Ledger refusal the SDK has wrapped in its own error", () => {
+    const refusal = new LedgerError("Rejected on the Ledger.", true);
+    const wrapped = new Error("Ceremony failed", { cause: new Error("join failed", { cause: refusal }) });
+    expect(findLedgerError(wrapped)).toBe(refusal);
+    expect(findLedgerError(refusal)).toBe(refusal);
+  });
+
+  it("finds nothing in an unrelated error", () => {
+    expect(findLedgerError(new Error("fetch failed", { cause: new Error("ECONNRESET") }))).toBeUndefined();
+    expect(findLedgerError("not an error")).toBeUndefined();
   });
 });
