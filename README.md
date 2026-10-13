@@ -85,9 +85,10 @@ You'll need these installed on your machine first:
   npm --version
   ```
 - **Git** — to clone this repository ([git-scm.com](https://git-scm.com/)).
-- **An EVM wallet private key** — a 0x-prefixed private key for any Ethereum
-  account (see step 3 below for what it's used for). A throwaway key is fine
-  for testnet; don't reuse one that holds real mainnet funds.
+- **An EVM wallet** — a 0x-prefixed private key for any Ethereum account (see
+  step 3 below for what it's used for), or a Ledger (see
+  [Signing with a Ledger](#signing-with-a-ledger)). A throwaway key is fine for
+  testnet; don't reuse one that holds real mainnet funds.
 
 ## Setup
 
@@ -110,6 +111,8 @@ You'll need these installed on your machine first:
      Salt covers the gas for those registry operations — the signer's wallet
      never pays gas; the accounts you create/hold assets in can live on many
      other supported testnets.
+   - Or, to keep that key on a Ledger instead, set `SIGNER=ledger` and leave
+     `PRIVATE_KEY` out — see [Signing with a Ledger](#signing-with-a-ledger).
 
    > ⚠️ **Mainnet security:** Use a dedicated signer/account with only the permissions and funds required for what you are doing. Do not paste the private key of a wallet holding significant assets into an unfamiliar environment, shared machine, shell history, source file or committed `.env` file.
 
@@ -147,8 +150,9 @@ wallet address, that's not a problem — each identity gets its own entry.
 
 There are no Salt usernames or passwords. salt-fi signs you in with
 **Sign-In with Ethereum (SIWE)**: the app signs a standard login message with
-the wallet from `PRIVATE_KEY`, and Salt verifies the signature and issues a
-session token. Signing happens locally, so the key never leaves your machine.
+your wallet (the key in `PRIVATE_KEY`, or your Ledger), and Salt verifies the
+signature and issues a session token. Signing happens locally, so the key never
+leaves your machine (or, with a Ledger, the device).
 Nothing goes on-chain and there's no gas to pay.
 
 That wallet's address is who you are in Salt:
@@ -170,6 +174,44 @@ session is scoped to the environment you picked (`testnet.salt.space` or
 `.salt-session.mainnet.json` (both gitignored), so you don't sign again on
 every launch. The app refreshes the token automatically; if it can't, it
 discards the session and signs you in afresh.
+
+## Signing with a Ledger
+
+Your signer key can live on a Ledger instead of in `.env`. The Salt SDK only
+ever asks your wallet for signatures, never for the key itself: the sign-in
+message, Robo Guardian activation, and a typed message that unlocks your
+keyshare in each account ceremony. The device can sign all of these.
+
+1. Install the **Ethereum** app on your Ledger (Nano S Plus, Nano X, Stax or
+   Flex) with Ledger Live, then **quit Ledger Live**, because it holds onto the
+   USB connection. The original Nano S also works, but it can only show you
+   hashes for typed messages.
+2. In `.env`, set `SIGNER=ledger`. It signs with Ledger Live's first Ethereum
+   account by default; set `LEDGER_PATH` to use another (Ledger Live's account
+   N is `44'/60'/N'/0/0`). On Linux, install
+   [Ledger's udev rules](https://github.com/LedgerHQ/udev-rules) first.
+3. Plug in the Ledger, unlock it, open the Ethereum app and run `npm run dev`.
+
+What to expect:
+
+- **You confirm on the device** when you sign in (unless your cached session is
+  still valid) and once for each account ceremony: creating an account,
+  sending, swapping, bridging, signing a message, and so on. "Verify account
+  backup" runs two ceremonies, so it asks twice. The ceremony prompt is a typed
+  message from `salt.space` with the action `derive-key`. Confirm it promptly,
+  because the other signers are waiting in the ceremony.
+- **Nudges need you at the device.** "Listen for account nudges" joins
+  ceremonies for you, but each one still waits for a confirmation on the
+  Ledger, so it won't co-sign unattended.
+- **A Ledger is a new identity.** Its address differs from your `PRIVATE_KEY`
+  wallet's, so it starts with no organisations or accounts. Invite it into
+  your organisation, then create accounts with it as a signer. Accounts your old
+  key co-signs stay tied to that key.
+- **Robo Guardian seed backups** are encrypted to your signer's public key
+  (see [Signing in](#signing-in-your-wallet-is-your-identity)). salt-fi never
+  decrypts them, and a Ledger can sign but won't decrypt. If you set up Robo
+  Guardians as a Ledger owner, recovering that seed yourself would need your
+  Ledger's recovery phrase in a software wallet.
 
 ## Usage
 

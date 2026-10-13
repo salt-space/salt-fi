@@ -1,9 +1,17 @@
-import { createWalletClient, http, serializeSignature, toHex, type Hex } from "viem";
+import { createWalletClient, http, serializeSignature, toHex, type Hex, type LocalAccount } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { env, network } from "./env.js";
 
-export function createSaltWalletClient() {
-  const account = privateKeyToAccount(env.privateKey);
+/**
+ * The signer's wallet, keyed by `SIGNER`: a raw key from PRIVATE_KEY, or a Ledger.
+ * Either way the Salt SDK only asks it for signatures — EIP-191 messages and
+ * EIP-712 typed data — never for key material.
+ */
+export async function createSaltWalletClient() {
+  const account: LocalAccount =
+    env.signer === "ledger"
+      ? await (await import("./ledger.js")).ledgerAccount(env.ledgerPath)
+      : privateKeyToAccount(env.privateKey);
   return createWalletClient({
     account,
     // The env's shard-registry chain (Arbitrum One on mainnet, Arbitrum Sepolia on
@@ -15,7 +23,7 @@ export function createSaltWalletClient() {
   });
 }
 
-export type SaltWalletClient = ReturnType<typeof createSaltWalletClient>;
+export type SaltWalletClient = Awaited<ReturnType<typeof createSaltWalletClient>>;
 
 /**
  * Normalise the SDK's `{ r, s, v }` EvmSignature into a serialized hex string —

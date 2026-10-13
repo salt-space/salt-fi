@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { network } from "./env.js";
+import { env, network } from "./env.js";
 import { runMenu } from "./menu.js";
 import { loadSalt } from "./session.js";
 import { createSaltWalletClient } from "./wallet.js";
@@ -20,9 +20,18 @@ export async function runApp(): Promise<void> {
     );
   }
 
-  const walletClient = createSaltWalletClient();
+  const onLedger = env.signer === "ledger";
+  if (onLedger) {
+    // Device prompts arrive mid-spinner, where a printed line would garble it — so
+    // say once, up front, that the Ledger will ask.
+    p.log.info(
+      `Signing with your Ledger (${env.ledgerPath}). Keep it unlocked with the Ethereum app open: ` +
+        "it asks you to confirm at sign-in and once for each account ceremony (create, send, sign, swap…).",
+    );
+  }
+  const walletClient = await createSaltWalletClient();
   const s = p.spinner();
-  s.start(`Signing in to ${network.label}`);
+  s.start(`Signing in to ${network.label}${onLedger ? " (confirm on your Ledger if it asks)" : ""}`);
   const salt = await loadSalt(walletClient);
   s.stop(`Signed in as ${walletClient.account.address} · ${network.label}`);
 
