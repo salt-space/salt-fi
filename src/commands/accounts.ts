@@ -36,6 +36,17 @@ export async function listAccounts(salt: Salt): Promise<void> {
   }
 }
 
+/**
+ * What an account with `humans` human signers adds up to. Salt adds one Robo
+ * Guardian fewer than the humans, and the threshold is the number of humans
+ * (docs.salt.space, Accounts → Account configurations).
+ */
+export function describeConfiguration(humans: number): string {
+  if (humans < 2 || humans > 4) return `${humans} human signers isn't a supported configuration (2 to 4, including you).`;
+  const robos = humans - 1;
+  return `+ ${robos} Robo Guardian${robos === 1 ? "" : "s"}: ${humans} of ${humans + robos} must sign`;
+}
+
 /** `preselectedOrganisationId` skips the org picker — used by the getting-started wizard, which already knows the org. */
 export async function createAccountFlow(
   salt: Salt,
@@ -73,10 +84,11 @@ export async function createAccountFlow(
   if (otherActiveMembers.length === 0) {
     p.log.info("No other active collaborators in this organisation to add as co-signers.");
   } else {
+    // Nothing pre-ticked: each co-signer changes the account's configuration
+    // (see describeConfiguration), so every one should be a deliberate choice.
     const selected = await p.multiselect({
-      message: "Select additional co-signers (optional)",
-      required: false,
-      initialValues: [otherActiveMembers[0].address],
+      message: "Co-signers (space to tick, enter to confirm)",
+      required: true,
       options: otherActiveMembers.map((member) => ({
         value: member.address,
         label: member.name || member.address,
@@ -89,15 +101,17 @@ export async function createAccountFlow(
 
   const signers = [selfAddress, ...extraSigners];
 
+  const signerNames = signers.map((address) =>
+    address === selfAddress ? `You (${address})` : `${memberNameByAddress.get(address.toLowerCase()) ?? address} (${address})`,
+  );
   const confirmed = await p.confirm({
-    message: `Create account "${name}" with signers:\n  ${signers.join("\n  ")}`,
+    message: `Create account "${name}"?\n  ${signerNames.join("\n  ")}\n  ${describeConfiguration(signers.length)}`,
   });
   if (p.isCancel(confirmed) || !confirmed) return;
 
-  // Account creation backs up a keyshare, which needs the signer's public key. That key
-  // is recovered during a live `authenticate()` and kept in memory on this Salt instance
-  // — it is NOT carried by a session restored from a cached auth token. So re-authenticate
-  // here if needed, otherwise the backup step fails with
+  // Account creation backs up a keyshare, which needs the signer's public key. salt-sdk
+  // 0.0.43 reads it from the session token, but older sessions may not carry it, so
+  // re-authenticate if it's missing; otherwise the backup step fails with
   // "Cannot back up a keyshare without the owner public key".
   await ensureSignerPublicKey(salt, walletClient);
 
