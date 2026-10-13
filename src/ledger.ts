@@ -102,22 +102,63 @@ export interface LedgerDevice {
   transport: { readonly disconnected: boolean; close(): Promise<void> };
 }
 
+export interface DeviceConnectionOptions {
+  /** How long to keep looking for a Ledger that dropped off USB mid-session. */
+  reconnectWaitMs?: number;
+  /** How often to look for it meanwhile. */
+  pollMs?: number;
+  /** Where to report connection events (LEDGER_DEBUG). */
+  debug?: (message: string) => void;
+}
+
 /**
  * A connection to the device, opened on first use and reopened when it drops.
  * Requests are queued, since the device handles one exchange at a time and
  * errors on overlap. Errors come back explained (see {@link explain}).
  */
-export function deviceConnection(openDevice: () => Promise<LedgerDevice>): LedgerConnection {
+export function deviceConnection(
+  openDevice: () => Promise<LedgerDevice>,
+  { reconnectWaitMs = 10_000, pollMs = 500, debug }: DeviceConnectionOptions = {},
+): LedgerConnection {
   let device: LedgerDevice | undefined;
+  let connectedBefore = false;
+
+  // A Ledger drops off USB for a moment whenever an app opens or closes on it, so
+  // once it's been connected, keep looking for a while before giving up on it.
+  const reconnect = async (): Promise<LedgerDevice> => {
+    const deadline = Date.now() + reconnectWaitMs;
+    for (;;) {
+      try {
+        return await openDevice();
+      } catch (err) {
+        if ((err as { id?: string }).id !== "NoDevice") throw err;
+        if (Date.now() >= deadline) {
+          throw new LedgerError(
+            `Lost your Ledger: it stopped showing up over USB and didn't come back within ${reconnectWaitMs / 1000}s. ` +
+              "Check it's plugged in, unlocked and in the Ethereum app, and that Ledger Live is closed, then try again.",
+            false,
+            { cause: err },
+          );
+        }
+        debug?.("No Ledger on USB right now; waiting for it to come back");
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+    }
+  };
+
   const open = async () => {
     const stale = device;
     device = undefined;
     await stale?.transport.close().catch(() => {});
-    device = await openDevice();
+    debug?.(connectedBefore ? "Reconnecting to the Ledger" : "Opening the Ledger over USB");
+    device = connectedBefore ? await reconnect() : await openDevice();
+    connectedBefore = true;
+    debug?.("Connected");
     return device;
   };
 
   const run = async <T>(fn: (eth: LedgerEthApp) => Promise<T>): Promise<T> => {
+    if (device?.transport.disconnected) debug?.("The USB connection was marked disconnected");
     const reused = device !== undefined && !device.transport.disconnected;
     const { eth } = reused ? device! : await open();
     try {
@@ -126,6 +167,7 @@ export function deviceConnection(openDevice: () => Promise<LedgerDevice>): Ledge
       // Opening or closing an app on the device re-enumerates it on USB, which
       // kills the old handle — reconnect once and retry.
       if (!reused || !isDisconnect(err)) throw err;
+      debug?.(`The USB connection went stale (${(err as Error).name}: ${(err as Error).message})`);
       return fn((await open()).eth);
     }
   };
@@ -140,8 +182,12 @@ export function deviceConnection(openDevice: () => Promise<LedgerDevice>): Ledge
   };
 }
 
-/** The first Ledger on USB. */
-export function usbConnection(): LedgerConnection {
+/**
+ * The first Ledger on USB. With `debug`, connection events go to stderr: the
+ * transport's own traces, minus APDUs (they carry what's being signed and the
+ * signatures), plus which Ledger USB interfaces are visible when none matches.
+ */
+export function usbConnection({ debug = false }: { debug?: boolean } = {}): LedgerConnection {
   let Eth: EthAppClass;
   let Transport: TransportClass;
   try {
@@ -154,10 +200,42 @@ export function usbConnection(): LedgerConnection {
       { cause: err },
     );
   }
-  return deviceConnection(async () => {
-    const transport = await Transport.open("");
-    return { eth: new Eth(transport), transport };
-  });
+  const log = debug ? (message: string) => void process.stderr.write(`[ledger] ${message}\n`) : undefined;
+  // Resolve the transport's own copies of node-hid and @ledgerhq/logs: the logs
+  // package keeps its subscribers per copy.
+  const transportRequire = createRequire(require.resolve("@ledgerhq/hw-transport-node-hid-noevents"));
+  if (log) {
+    const logs = createRequire(transportRequire.resolve("@ledgerhq/hw-transport"))("@ledgerhq/logs") as {
+      listen: (cb: (entry: { type: string; message?: string }) => void) => void;
+    };
+    logs.listen((entry) => {
+      if (entry.type !== "apdu") log(`${entry.type}: ${entry.message ?? ""}`);
+    });
+  }
+  const visibleInterfaces = () => {
+    try {
+      const hid = transportRequire("node-hid") as {
+        devices: (vendorId: number, productId: number) => { product?: string; usagePage?: number; interface?: number }[];
+      };
+      const found = hid.devices(0x2c97, 0); // Ledger's USB vendor id
+      return found.map((d) => `${d.product ?? "?"} (usagePage 0x${(d.usagePage ?? 0).toString(16)}, interface ${d.interface})`).join("; ") || "none";
+    } catch (err) {
+      return `couldn't list them (${(err as Error).message})`;
+    }
+  };
+
+  return deviceConnection(
+    async () => {
+      try {
+        const transport = await Transport.open("");
+        return { eth: new Eth(transport), transport };
+      } catch (err) {
+        if (log && (err as { id?: string }).id === "NoDevice") log(`No usable Ledger interface. Ledger USB interfaces visible: ${visibleInterfaces()}`);
+        throw err;
+      }
+    },
+    { debug: log },
+  );
 }
 
 function messageHex(message: SignableMessage): string {

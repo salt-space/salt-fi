@@ -192,12 +192,19 @@ keyshare in each account ceremony. The device can sign all of these.
    [Ledger's udev rules](https://github.com/LedgerHQ/udev-rules) first.
 3. Plug in the Ledger, unlock it, open the Ethereum app and run `npm run dev`.
 
+If the app loses track of your Ledger, run it with `LEDGER_DEBUG=1` to print
+the USB connection events (never what's being signed).
+
 What to expect:
 
-- **You confirm on the device** when you sign in (unless your cached session is
-  still valid) and once for each account ceremony: creating an account,
-  sending, swapping, bridging, signing a message, and so on. "Verify account
-  backup" runs two ceremonies, so it asks twice. The ceremony prompt is a typed
+- **You confirm on the device** when you sign in, unless your saved session is
+  still valid ("Signed in as … (saved session)" means no signature was needed;
+  the app only read your address from the device). Creating an account or
+  listening for nudges then signs you in again first, because a saved session
+  doesn't carry your public key. You also confirm once for each account
+  ceremony: creating an account, sending, swapping, bridging, signing a
+  message, and so on. "Verify account backup" runs two ceremonies, so it asks
+  twice. The ceremony prompt is a typed
   message from `salt.space` with the action `derive-key`. Confirm it promptly,
   because the other signers are waiting in the ceremony.
 - **Creating or joining an account asks first.** The SDK needs that prompt to

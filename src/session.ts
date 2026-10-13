@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as p from "@clack/prompts";
 import { Salt } from "salt-sdk";
-import { network } from "./env.js";
+import { env, network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
 import type { SaltWalletClient } from "./wallet.js";
 
@@ -96,7 +97,15 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<Salt> {
  * is missing, so token caching still speeds up ordinary read calls.
  */
 export async function ensureSignerPublicKey(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
-  if (!salt.userPublicKey) {
+  if (salt.userPublicKey) return;
+  // Say so: after a saved-session start, this is the first signature of the run.
+  const s = p.spinner();
+  s.start(`Signing in again for your public key${env.signer === "ledger" ? " (confirm on your Ledger)" : ""}`);
+  try {
     await salt.authenticate(walletClient);
+    s.stop("Signed in");
+  } catch (err) {
+    s.error("Sign-in failed");
+    throw err;
   }
 }

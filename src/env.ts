@@ -79,6 +79,10 @@ export const env = {
     }
     return path;
   },
+  /** LEDGER_DEBUG=1 prints Ledger USB connection events to stderr. */
+  get ledgerDebug(): boolean {
+    return process.env.LEDGER_DEBUG === "1";
+  },
   get privateKey(): `0x${string}` {
     const key = requireEnv("PRIVATE_KEY");
     if (!key.startsWith("0x")) {

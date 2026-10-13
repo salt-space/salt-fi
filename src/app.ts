@@ -27,8 +27,8 @@ export async function runApp(): Promise<void> {
     // Device prompts arrive mid-spinner, where a printed line would garble it — so
     // say once, up front, that the Ledger will ask.
     p.log.info(
-      `Signing with your Ledger (${env.ledgerPath}). Keep it unlocked with the Ethereum app open: ` +
-        "it asks you to confirm at sign-in and once for each account ceremony (create, send, sign, swap…).",
+      `Signing with your Ledger (${env.ledgerPath}). Keep it unlocked with the Ethereum app open: it asks you to ` +
+        "confirm when signing in (unless a saved session is still valid) and once for each account ceremony (create, send, sign, swap…).",
     );
   }
   const signedIn = await signIn(onLedger);
@@ -56,7 +56,9 @@ async function signIn(onLedger: boolean): Promise<{ salt: Salt; walletClient: Sa
     try {
       walletClient ??= await createSaltWalletClient();
       const salt = await loadSalt(walletClient);
-      s.stop(`Signed in as ${walletClient.account.address} · ${network.label}`);
+      // Only a live sign-in recovers the public key; a saved session skips the signature.
+      const savedSession = !salt.userPublicKey;
+      s.stop(`Signed in as ${walletClient.account.address} · ${network.label}${savedSession ? " (saved session)" : ""}`);
       return { salt, walletClient };
     } catch (err) {
       const ledgerError = findLedgerError(err);

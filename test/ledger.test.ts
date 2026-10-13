@@ -195,11 +195,47 @@ describe("deviceConnection", () => {
     await expect(connection((eth) => eth.getAddress(PATH))).rejects.toBe(original);
   });
 
-  it("explains a failure to open the device", async () => {
+  it("explains a failure to open the device, without waiting on the first connect", async () => {
+    let opens = 0;
     const connection = deviceConnection(async () => {
+      opens++;
       throw Object.assign(new Error("NoDevice"), { id: "NoDevice" });
     });
     await expect(connection((eth) => eth.getAddress(PATH))).rejects.toThrow(/No Ledger found over USB/);
+    expect(opens).toBe(1);
+  });
+
+  /** A device whose first handle answers once and then dies, as when it drops off USB. */
+  function flakyUsb(opts: { absentFor: number }) {
+    let opens = 0;
+    const openDevice = async () => {
+      const n = ++opens;
+      if (n > 1 && n <= 1 + opts.absentFor) throw Object.assign(new Error("NoDevice"), { id: "NoDevice" });
+      let calls = 0;
+      const eth = ethWith(async () => {
+        if (n === 1 && ++calls > 1) throw named("DisconnectedDeviceDuringOperation");
+        return { address: `0x${n}`, publicKey: "" };
+      });
+      return { eth, transport: { disconnected: false, close: async () => {} } };
+    };
+    return { openDevice, opens: () => opens };
+  }
+
+  it("keeps looking for a Ledger that dropped off USB mid-session", async () => {
+    const usb = flakyUsb({ absentFor: 2 });
+    const connection = deviceConnection(usb.openDevice, { reconnectWaitMs: 1_000, pollMs: 1 });
+    await connection((eth) => eth.getAddress(PATH));
+    expect((await connection((eth) => eth.getAddress(PATH))).address).toBe("0x4");
+    expect(usb.opens()).toBe(4);
+  });
+
+  it("gives up on a Ledger that doesn't come back, saying it was lost", async () => {
+    const usb = flakyUsb({ absentFor: Infinity });
+    const connection = deviceConnection(usb.openDevice, { reconnectWaitMs: 20, pollMs: 1 });
+    await connection((eth) => eth.getAddress(PATH));
+    const failure = await connection((eth) => eth.getAddress(PATH)).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(LedgerError);
+    expect((failure as Error).message).toMatch(/Lost your Ledger: it stopped showing up over USB/);
   });
 });
 
