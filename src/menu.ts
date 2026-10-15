@@ -6,6 +6,16 @@ import { accountBalancesFlow } from "./commands/balances.js";
 import { bridgeFlow } from "./commands/bridge.js";
 import { createOrganisationFlow, setUpRoboFlow } from "./commands/create-organisation.js";
 import { faucetFlow } from "./commands/faucet.js";
+import {
+  chooseFeePayerFlow,
+  feeBalancesFlow,
+  feeStatusLine,
+  presignBatchFlow,
+  showFeeQuoteFlow,
+  togglePresignFlow,
+  viewFeePaymentsFlow,
+  viewStashFlow,
+} from "./commands/fees.js";
 import { gettingStartedFlow } from "./commands/getting-started.js";
 import {
   hinkalBalanceFlow,
@@ -34,6 +44,7 @@ import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
 import { network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
+import { supportsFees } from "./fees.js";
 import { findLedgerError } from "./ledger.js";
 import { select } from "./prompts.js";
 import { clearStoredSession } from "./session.js";
@@ -131,6 +142,19 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "policy-chat", label: "Policy chat", run: () => policyChatFlow(salt, walletClient) },
       ],
     },
+    // Only offered on a salt-sdk with the fee API (see src/fees.ts).
+    fees: {
+      title: "Fees (x402)",
+      entries: [
+        { value: "fee-quote", label: "Show what Salt charges", hint: "per operation, per chain", run: () => showFeeQuoteFlow(salt) },
+        { value: "fee-payer", label: "Choose who pays", hint: "signer / sponsor wallet / Salt account / nobody", run: () => chooseFeePayerFlow(salt, walletClient) },
+        { value: "fee-presign", label: "Toggle pre-signed payment", hint: "sign up front (one request) vs pay on the 402", run: () => togglePresignFlow() },
+        { value: "fee-batch", label: "Pre-sign a batch", hint: "sign N fee authorisations now, spend one per call later", run: () => presignBatchFlow(salt, walletClient) },
+        { value: "fee-stash", label: "View / clear the pre-signed stash", run: () => viewStashFlow() },
+        { value: "fee-balances", label: "Check payer USDC balances", run: () => feeBalancesFlow(salt, walletClient) },
+        { value: "fee-history", label: "View fee payments", hint: "per organisation", run: () => viewFeePaymentsFlow(salt) },
+      ],
+    },
     privacy: {
       title: "Privacy (Hinkal)",
       entries: [
@@ -167,6 +191,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "accounts", label: "Accounts ▸" },
         { value: "assets", label: "Assets ▸" },
         { value: "policies", label: "Policies ▸" },
+        ...(supportsFees(salt) ? [{ value: "fees", label: "Fees (x402) ▸", hint: feeStatusLine() }] : []),
         { value: "privacy", label: "Privacy (Hinkal) ▸" },
         { value: "hyperliquid", label: "Hyperliquid ▸" },
         { value: EXIT, label: "Exit" },

@@ -4,6 +4,7 @@ import { buildTransferTransaction, TransferType } from "salt-sdk";
 import { createPublicClient, formatUnits, http } from "viem";
 import { CHAIN_BY_ID, CHAIN_NAME_BY_ID, explorerTxUrl, rpcUrl, SEND_NETWORK_IDS } from "../chains.js";
 import { reportError, txHashFromError } from "../errors.js";
+import { feeCeremonyNote } from "../fees.js";
 import { fetchTokenPricesUsd, tokenPriceKey } from "../lifi.js";
 import { pickOrganisation, promptTokenAmount, select } from "../prompts.js";
 import { fetchAccountTokens, formatBalanceHint } from "../token-balances.js";
@@ -247,7 +248,8 @@ export async function sendTransactionFlow(salt: Salt, walletClient: SaltWalletCl
 
       if (previousStage === "proposing") {
         const seconds = ((now - stageEnteredAt.proposing) / 1000).toFixed(1);
-        p.log.message(`Transaction proposed in ${seconds}s (tx record + policy check)`);
+        // A Salt-account fee payer runs its own MPC ceremony inside this stage; say how much of it that was.
+        p.log.message(`Transaction proposed in ${seconds}s (tx record + policy check)${feeCeremonyNote()}`);
       } else if (previousStage === "signing") {
         const seconds = ((now - stageEnteredAt.signing) / 1000).toFixed(1);
         const cryptoNote =

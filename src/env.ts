@@ -26,6 +26,9 @@ export interface SaltNetwork {
   shardRegistryChain: Chain;
   /** Human label for prompts/logs. */
   label: string;
+  /** Whether this deployment's chains carry real value. Code that spends money (like
+   *  paying a fee) keys its defaults on this rather than on the environment's name. */
+  realFunds: boolean;
 }
 
 const NETWORKS: Record<SaltEnv, Omit<SaltNetwork, "saltEnv">> = {
@@ -34,6 +37,7 @@ const NETWORKS: Record<SaltEnv, Omit<SaltNetwork, "saltEnv">> = {
     domain: "testnet.salt.space",
     shardRegistryChain: arbitrumSepolia,
     label: "Testnet",
+    realFunds: false,
   },
   mainnet: {
     environment: "MAINNET",
@@ -41,6 +45,7 @@ const NETWORKS: Record<SaltEnv, Omit<SaltNetwork, "saltEnv">> = {
     // Public salt-sdk exposes MAINNET as of 0.0.39. Real funds — see README.
     shardRegistryChain: arbitrum,
     label: "Mainnet",
+    realFunds: true,
   },
 };
 

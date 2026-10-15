@@ -4,6 +4,8 @@ import * as p from "@clack/prompts";
 import { Salt } from "salt-sdk";
 import { env, network } from "./env.js";
 import { isAuthExpired } from "./errors.js";
+import { installFees } from "./fees.js";
+import { installPolicyCompat } from "./policy-compat.js";
 import type { SaltWalletClient } from "./wallet.js";
 
 // Session cache is scoped per environment so a testnet token is never reused
@@ -45,6 +47,9 @@ export function clearStoredSession(address: string): void {
  * auto-refresh an expired (~20-min) access token instead of failing on expiry.
  *
  * `savedSession` says whether the cached token was reused, i.e. nothing was signed.
+ *
+ * Either way the instance comes back with fee payment (src/fees.ts) and the policy-signing
+ * shim (src/policy-compat.ts) hooked in. Both are no-ops on salt-sdk 0.0.43 and earlier.
  */
 export async function loadSalt(walletClient: SaltWalletClient): Promise<{ salt: Salt; savedSession: boolean }> {
   const address = walletClient.account.address.toLowerCase();
@@ -66,7 +71,7 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<{ salt: 
         authToken: stored.authToken,
         refreshToken: salt.getRefreshToken() ?? stored.refreshToken,
       });
-      return { salt, savedSession: true };
+      return { salt: withCompat(salt, walletClient), savedSession: true };
     } catch (err) {
       if (isAuthExpired(err)) {
         clearStoredSession(address);
@@ -79,8 +84,12 @@ export async function loadSalt(walletClient: SaltWalletClient): Promise<{ salt: 
   const salt = new Salt({ environment: network.environment, domain: DOMAIN });
   const authToken = await salt.authenticate(walletClient);
   writeStoredSession(address, { authToken, refreshToken: salt.getRefreshToken() ?? undefined });
-  return { salt, savedSession: false };
+  return { salt: withCompat(salt, walletClient), savedSession: false };
 }
+
+/** Hook in fee payment and the policy-signing shim, so no call site has to know about either. */
+const withCompat = (salt: Salt, walletClient: SaltWalletClient): Salt =>
+  installPolicyCompat(installFees(salt, walletClient), walletClient);
 
 /**
  * Ensure this Salt instance has a **live-authenticated signer public key** before an

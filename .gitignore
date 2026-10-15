@@ -11,5 +11,8 @@ dist/
 .hyperliquid-delta-neutral*.json
 robo-setup-*.sh
 
+# pre-signed fee payments (anyone holding the file can spend them)
+.fee-stash.*.json
+
 # headless testnet smoke test state (contains disposable keys)
 .testnet-smoke.json

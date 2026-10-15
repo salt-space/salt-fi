@@ -6,8 +6,9 @@ import type { SaltWalletClient } from "./wallet.js";
 /**
  * The EIP-712 request salt-sdk makes of a signer to derive the key that encrypts
  * its keyshare for `accountId` (fed through Salt's OPRF). It's SDK-internal —
- * observed in salt-sdk 0.0.43 — so if an upgrade changes it, the flows that use
- * {@link keyshareBackupSigner} warn that the early approval went unused.
+ * observed in salt-sdk 0.0.43; 0.0.44 still uses the same names and version — so
+ * if an upgrade changes it, the flows that use {@link keyshareBackupSigner} warn
+ * that the early approval went unused.
  */
 export function keyshareKeyRequest(signer: Address, accountId: string) {
   return {

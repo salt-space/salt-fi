@@ -74,6 +74,14 @@ export function formatSaltError(err: unknown): string {
   if (err instanceof ValidationError) {
     return `Invalid input: ${err.message}`;
   }
+  if (err instanceof ApiError && err.status === 402) {
+    // x402: Salt charges a fee for this call and no accepted payment came with it — usually
+    // because nobody is set to pay (the default on mainnet). See src/fees.ts.
+    return (
+      `Salt charges a fee for this, and it wasn't paid (${err.message}). Choose who pays under ` +
+      'Fees (x402) → "Choose who pays", or set SALT_FEE_PAYER in .env (see "Fees (x402)" in the README).'
+    );
+  }
   if (err instanceof ApiError) {
     return `API error: ${err.message}${err.code ? ` [${err.code}]` : ""}${apiErrorDetails(err.body)}`;
   }
