@@ -241,6 +241,8 @@ interactive menu.
 The launch banner names the environment, and mainnet is flagged with a real-funds
 warning so you always know which network you're on. It's grouped, with a
 guided walkthrough at the top and the individual tools organised into submenus.
+Creating an account and sending a transaction can cost a small fee; see
+[Fees (x402)](#fees-x402) for who pays it.
 
 - **Getting started** — a guided, five-step walkthrough that teaches each Salt
   concept as it sets it up: organisation → collaborators → Robo Guardians →
@@ -357,6 +359,79 @@ guided walkthrough at the top and the individual tools organised into submenus.
   [`docs/requested-policies.md`](docs/requested-policies.md) for the Salt
   team. Requires an `ANTHROPIC_API_KEY` in `.env` (this is the only feature
   that needs one); powered by Claude via the Anthropic SDK.
+
+From salt-sdk 0.0.44, your wallet signs every policy change
+(create, edit or delete). The app does this for you with the wallet you signed
+in with; on a Ledger, confirm it on the device.
+
+## Fees (x402)
+
+Salt can charge a small fee, in USDC, for two things: **creating an account**
+and **sending a transaction** (anything that submits one: sending, swapping,
+bridging, and so on). It's paid over x402, an open standard for paying over
+HTTP: when an action costs a fee and nothing has paid it, Salt answers
+`402 Payment Required`, and the app signs a USDC payment and tries again. The
+payment is a signed transfer authorisation, so the wallet that pays needs the
+USDC but **no gas**.
+
+This needs salt-sdk 0.0.44 or newer, which this app installs. With 0.0.43
+or earlier the app never pays and the **Fees (x402)** menu doesn't appear.
+
+**Who pays.** Set `SALT_FEE_PAYER` in `.env`, or switch at any time from
+**Fees (x402) → Choose who pays**:
+
+| `SALT_FEE_PAYER` | Who pays |
+|---|---|
+| `signer` | Your signing wallet (the `PRIVATE_KEY` wallet, or your Ledger), from its own USDC. **The default on testnet.** |
+| `wallet` | A separate sponsor wallet, so your signer never needs to hold funds. Put its private key in `SALT_FEE_PAYER_KEY` (or enter it in the menu, where it's kept in memory for that session only). |
+| `account` | One of your Salt accounts. Put its id in `SALT_FEE_ACCOUNT_ID` (or pick it in the menu). Each payment is an MPC signing ceremony on that account, co-signed by its Robo Guardians and you, so they need to be online. |
+| `none` | Nobody: anything that costs a fee is refused. **The default on mainnet.** |
+
+**Mainnet never pays without asking.** Nothing picks a payer for you on
+mainnet. Even once you choose one, the app pays without asking only on a
+testnet chain, and only up to `SALT_FEE_MAX_USDC` (25 USDC by default). On any
+other chain it shows the amount, the chain and who it's paying, and asks you to
+confirm every payment; with no terminal to ask in, it refuses. On testnet, the
+app pays in test USDC automatically: give the paying wallet some testnet USDC
+from [Circle's faucet](https://faucet.circle.com/) on the chain it pays on.
+
+Each payment prints a `Fee:` line saying how much, on which chain, and who
+paid. Before paying, the app checks the payer holds enough USDC on that chain;
+if it doesn't, it stops before anything is signed and says what would work
+instead (another chain where that wallet has USDC, or another wallet that
+does). With a Ledger, each payment your signer makes, or co-signs for a Salt
+account, is one more confirmation on the device.
+
+The rest of the **Fees (x402)** menu:
+
+- **Show what Salt charges** — the fee for each action, on each chain Salt
+  accepts payment on.
+- **Toggle pre-signed payment** — sign the payment before the action instead
+  of in reply to the 402, so it goes through in one request rather than two.
+- **Pre-sign a batch** — sign several payments now and spend one per later
+  action. Signing costs nothing; only a payment that's spent costs the fee.
+  Each is tied to one payer, action and chain, expires after a while, and is
+  never used within two minutes of expiring. They're kept in
+  `.fee-stash.testnet.json` or `.fee-stash.mainnet.json` (owner-only and
+  gitignored). Anyone holding that file can spend them, so keep it private.
+- **View / clear the pre-signed stash** — what's signed and waiting, per payer;
+  remove expired ones or clear them all.
+- **Check payer USDC balances** — what each wallet that could pay holds on each
+  chain Salt accepts payment on.
+- **View fee payments** — the fees an organisation has paid.
+
+All the settings, all optional (`.env.example` has them, commented out):
+
+| Variable | What it does |
+|---|---|
+| `SALT_FEE_PAYER` | Who pays: `signer`, `wallet`, `account` or `none` (above). |
+| `SALT_FEE_PAYER_KEY` | The sponsor wallet's private key, for `wallet`. |
+| `SALT_FEE_ACCOUNT_ID` | The paying Salt account's id, for `account`. |
+| `SALT_FEE_CHAIN` | The chain id to pay on, e.g. `84532` for Base Sepolia. Unset, the payer pays on its own chain when Salt accepts payment there. |
+| `SALT_FEE_MAX_USDC` | Refuse any single payment above this many USDC (default `25`). |
+| `SALT_FEE_PRESIGN` | `1` signs each payment up front (as **Toggle pre-signed payment**). |
+| `SALT_FEE_PREFLIGHT` | `0` skips the check that the payer holds the fee. |
+| `SALT_FEE_STASH` | `0` leaves pre-signed payments in the stash unspent. |
 
 ## Docs
 

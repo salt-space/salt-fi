@@ -1,8 +1,17 @@
-import { createPublicClient, erc20Abi, formatUnits, http, type Address } from "viem";
+import { createPublicClient, erc20Abi, formatUnits, http, type Address, type Chain } from "viem";
 import { CHAIN_BY_ID, rpcUrl } from "./chains.js";
 import { KNOWN_TOKENS_BY_CHAIN } from "./uniswap.js";
 
 const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/**
+ * One wallet's balance of one ERC-20, in the token's smallest unit, over the chain's
+ * preferred RPC (see `rpcUrl`). Throws if the read fails.
+ */
+export function readTokenBalance(chain: Chain, token: Address, owner: Address): Promise<bigint> {
+  const client = createPublicClient({ chain, transport: http(rpcUrl(String(chain.id)), { timeout: 5_000, retryCount: 1 }) });
+  return client.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner] });
+}
 
 /**
  * Replacement for the SDK's removed `TokenBalance` type. `balance` is

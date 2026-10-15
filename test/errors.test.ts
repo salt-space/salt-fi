@@ -25,4 +25,12 @@ describe("formatSaltError · ApiError", () => {
       `API error: POST ${url} Request failed with status 502`,
     );
   });
+
+  it("says how to pay when Salt asks for a fee (402)", () => {
+    const err = new ApiError(402, { message: "Payment required before creating an account" }, url, "POST");
+    expect(formatSaltError(err)).toBe(
+      `Salt charges a fee for this, and it wasn't paid (POST ${url} Payment required before creating an account). ` +
+        'Choose who pays under Fees (x402) → "Choose who pays", or set SALT_FEE_PAYER in .env (see "Fees (x402)" in the README).',
+    );
+  });
 });

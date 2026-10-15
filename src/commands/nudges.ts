@@ -110,6 +110,9 @@ export async function listenForNudgesFlow(salt: Salt, walletClient: SaltWalletCl
   p.log.info("Listening for account-setup nudges. Leave this running while a teammate creates an account naming you as a signer.");
   await p.text({ message: "Press Enter to stop listening" });
 
-  listener.disableNudgeListener();
+  // salt-sdk 0.0.44 renamed disableNudgeListener() to stop(); call whichever this version has.
+  const stoppable = listener as { stop?: () => void; disableNudgeListener?: () => void };
+  if (typeof stoppable.stop === "function") stoppable.stop();
+  else stoppable.disableNudgeListener?.();
   p.log.info("Stopped listening for nudges.");
 }
