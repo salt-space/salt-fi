@@ -36,6 +36,80 @@ export async function listAccounts(salt: Salt): Promise<void> {
   }
 }
 
+/** The Salt API's rules for an account name (UpdateAccountParams): trimmed, not blank, no angle brackets, at most 50 characters. */
+export function accountNameProblem(raw: string | undefined): string | undefined {
+  const name = (raw ?? "").trim();
+  if (name.length === 0) return "Name is required";
+  if (/[<>]/.test(name)) return "Names can't use angle brackets (< or >)";
+  if ([...name].length > 50) return `That's ${[...name].length} characters; the limit is 50`;
+  return undefined;
+}
+
+/**
+ * Rename an account (`salt.updateAccount`). The API only lets an owner of the
+ * organisation who is also one of the account's signers do it, so both are checked
+ * first and named if missing. Free: renaming isn't a paid operation.
+ */
+export async function renameAccountFlow(salt: Salt, walletClient: SaltWalletClient): Promise<void> {
+  const organisationId = await pickOrganisation(salt, "Rename an account in which organisation?");
+  if (!organisationId) return;
+  const self = walletClient.account.address.toLowerCase();
+
+  let accounts;
+  let isOwner;
+  try {
+    const [list, { organisation }] = await Promise.all([salt.getAccounts(organisationId), salt.getOrganisationById(organisationId)]);
+    accounts = list;
+    isOwner = organisation.collaborators.some((m) => m.address.toLowerCase() === self && m.accessLevel === 1);
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  if (accounts.length === 0) {
+    p.log.info("No accounts in this organisation yet.");
+    return;
+  }
+
+  const accountId = await select({
+    message: "Which account?",
+    options: accounts.map((a) => ({ value: a.id, label: a.name, hint: a.evmAddress ?? "pending setup" })),
+  });
+  if (p.isCancel(accountId)) return;
+  const account = accounts.find((a) => a.id === accountId)!;
+
+  const isSigner = account.signers.some((a) => a.toLowerCase() === self);
+  if (!isOwner || !isSigner) {
+    const missing = [!isOwner && "an owner of this organisation", !isSigner && `a signer on "${account.name}"`].filter(Boolean).join(" or ");
+    p.log.warn(`Only an owner who is also one of the account's signers can rename it, and ${walletClient.account.address} isn't ${missing}.`);
+    return;
+  }
+
+  const entered = await p.text({ message: "New name", initialValue: account.name, validate: accountNameProblem });
+  if (p.isCancel(entered)) return;
+  const name = entered.trim();
+  if (name === account.name) {
+    p.log.info("That's its current name; nothing to change.");
+    return;
+  }
+
+  const go = await p.confirm({
+    message: `Rename "${account.name}" (${account.evmAddress ?? account.id}) to "${name}"?`,
+    initialValue: false,
+  });
+  if (p.isCancel(go) || !go) return;
+
+  const s = p.spinner();
+  s.start("Renaming");
+  try {
+    await salt.updateAccount(account.id, { name });
+    const updated = await salt.getAccount(account.id);
+    s.stop(updated.name === name ? `Renamed to "${updated.name}"` : `Sent, but the account still reads "${updated.name}"`);
+  } catch (err) {
+    s.stop("Rename failed");
+    reportError(err);
+  }
+}
+
 /**
  * What an account with `humans` human signers adds up to. Salt adds one Robo
  * Guardian fewer than the humans, and the threshold is the number of humans

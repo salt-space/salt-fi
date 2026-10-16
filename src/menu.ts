@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import type { Salt } from "salt-sdk";
-import { createAccountFlow, listAccounts, verifyAccountBackupFlow } from "./commands/accounts.js";
+import { createAccountFlow, listAccounts, renameAccountFlow, verifyAccountBackupFlow } from "./commands/accounts.js";
 import { signMessageFlow } from "./commands/sign.js";
 import { accountBalancesFlow } from "./commands/balances.js";
 import { bridgeFlow } from "./commands/bridge.js";
@@ -117,6 +117,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       entries: [
         { value: "create-account", label: "Create account", run: () => createAccountFlow(salt, walletClient) },
         { value: "accounts", label: "List accounts", run: () => listAccounts(salt) },
+        { value: "rename-account", label: "Rename account", hint: "owners who are also signers", run: () => renameAccountFlow(salt, walletClient) },
         { value: "sign-message", label: "Sign a message", hint: "personal_sign — proves account ownership, no funds move", run: () => signMessageFlow(salt, walletClient) },
         { value: "verify-backup", label: "Verify account backup", hint: "confirm keyshares are backed up + recoverable", run: () => verifyAccountBackupFlow(salt, walletClient) },
         { value: "listen-nudges", label: "Listen for account nudges", run: () => listenForNudgesFlow(salt, walletClient) },

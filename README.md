@@ -307,6 +307,11 @@ Creating an account and sending a transaction can cost a small fee; see
   in a terminal while you wait; press Enter to stop.
 - **List accounts** — the Salt accounts that exist within an organisation you
   pick.
+- **Rename account** — give an account a new name (`salt.updateAccount`). Salt
+  only lets an owner of the organisation who is also one of the account's
+  signers do this, so the app checks both first and says which is missing. A
+  name can't be blank, use angle brackets, or run past 50 characters. Renaming
+  is free: it isn't a paid action.
 
 ### Assets
 
