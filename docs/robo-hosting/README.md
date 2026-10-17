@@ -8,6 +8,9 @@ install anything yourself first** — both paths install Docker, Python, and
 everything else needed, generate and encrypt the robo's seed, and start the
 container automatically. The self-hosted script just needs a box to run it
 on (root shell); CloudFormation needs nothing beyond an AWS console login.
+An experimental third way, [Aleph Cloud](aleph.md), runs the self-hosted
+script on a VM the app creates for you, so it needs no server of your own,
+just an Aleph wallet with credits.
 
 That box can be almost anything — a VPS, a spare machine on your desk, a
 cloud instance. This folder collects platform-specific guides, since the
@@ -28,6 +31,11 @@ validate them.
   as an option in "Create organisation". Template contents verified correct;
   no one's launched a real stack from it yet in this app. The self-hosted
   script also works fine on a plain EC2 instance if you'd rather not use it.
+
+- **[Aleph Cloud](aleph.md)** — experimental: the app creates a pay-as-you-go
+  Aleph Cloud VM and runs the script on it for you (Robo Guardians → Set up
+  Robo Guardians → "Aleph Cloud VM"), and can buy the Aleph credits it runs
+  on. Run end to end on mainnet; deleting a VM is still untested.
 
 More guides will be added here as we validate other hosts. If you set one
 up somewhere not listed, a PR adding a guide for it is welcome.

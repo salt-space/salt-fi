@@ -16,3 +16,7 @@ robo-setup-*.sh
 
 # headless testnet smoke test state (contains disposable keys)
 .testnet-smoke.json
+
+# Aleph Cloud robo VMs: what this app created (for teardown), and their SSH host keys
+.aleph-vms.json
+.aleph-known-hosts

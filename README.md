@@ -261,7 +261,9 @@ Creating an account and sending a transaction can cost a small fee; see
   on any Ubuntu or Debian box and it installs everything it needs (Docker
   included) and starts the robo itself — or an AWS CloudFormation URL that
   launches a pre-filled stack doing the same thing with no server access
-  needed. Either way, check progress afterward with "Check robo guardians".
+  needed. (There's an experimental third choice too, Aleph Cloud: see Robo
+  Guardians below.) Either way, check progress afterward with "Check robo
+  guardians".
   See [`docs/robo-hosting/`](docs/robo-hosting/README.md) for platform-specific
   walkthroughs (Hostinger validated end-to-end; the AWS template's contents
   are verified correct for testnet, but no one's launched a real stack from
@@ -281,16 +283,28 @@ Creating an account and sending a transaction can cost a small fee; see
 ### Robo Guardians
 
 - **Set up Robo Guardians** — register (or re-issue setup for) an existing
-  organisation's robo host and get its self-hosted script or CloudFormation
-  URL — the same setup "Create organisation" offers, but available any time,
-  not just at creation. Reuses an existing host record rather than failing if
-  one's already registered.
+  organisation's robo host and get its self-hosted script, CloudFormation
+  URL or (experimental) Aleph Cloud VM — the same setup "Create
+  organisation" offers, but available any time, not just at creation.
+  Reuses an existing host record rather than failing if one's already
+  registered.
 - **Check robo guardians** — see whether an organisation's Robo Guardians
   are currently online, before starting a ceremony that needs them. Worth
   checking if "Create account" ever seems stuck waiting for a signer to join
   — there's no timeout for a party that never shows up in the huddle
   (`timeoutMs` on account creation only bounds keygen rounds *after*
   everyone's present, not the wait for presence itself).
+- **Aleph Cloud (experimental)** — host a robo on a pay-as-you-go
+  [Aleph Cloud](https://aleph.cloud) VM without running a server yourself.
+  Choose "Aleph Cloud VM" when setting up Robo Guardians and the app creates
+  the VM, runs the setup script on it over SSH, waits for the robo to connect
+  and offers activation. **Aleph Cloud VMs** lists the VMs created here
+  (resume a stopped setup, open an SSH session, delete one), and **Aleph
+  credits** shows the Aleph wallet's credits and buys more with USDC or ETH on
+  Ethereum. The Aleph wallet is `ALEPH_PRIVATE_KEY`, or your signing wallet if
+  you sign with `PRIVATE_KEY` (a Ledger can't be the Aleph wallet yet). Aleph
+  credits are real funds, even on testnet. See
+  [`docs/robo-hosting/aleph.md`](docs/robo-hosting/aleph.md).
 
 ### Accounts
 

@@ -40,6 +40,7 @@ import { inviteMemberFlow, listOrganisations, manageCollaboratorsFlow } from "./
 import { policyChatFlow } from "./commands/policy-chat.js";
 import { policyManagementFlow } from "./commands/policy-management.js";
 import { activateRoboFlow, checkRoboStatusFlow } from "./commands/robos.js";
+import { alephCreditsFlow, alephVmsFlow } from "./commands/aleph-robo.js";
 import { sendTransactionFlow } from "./commands/send.js";
 import { swapFlow } from "./commands/swap.js";
 import { network } from "./env.js";
@@ -110,6 +111,8 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
         { value: "robo-setup", label: "Set up Robo Guardians", run: () => setUpRoboFlow(salt, walletClient) },
         { value: "robo-activate", label: "Activate Robo Guardians (2FA)", hint: "required after setup — robos can't sign until activated", run: () => activateRoboFlow(salt, walletClient) },
         { value: "robo-status", label: "Check robo guardians", run: () => checkRoboStatusFlow(salt) },
+        { value: "aleph-vms", label: "Aleph Cloud VMs (experimental)", hint: "robos hosted on Aleph: status, resume setup, SSH, delete", run: () => alephVmsFlow(salt, walletClient) },
+        { value: "aleph-credits", label: "Aleph credits (experimental)", hint: "the Aleph wallet's credits, and buying more with USDC or ETH", run: () => alephCreditsFlow() },
       ],
     },
     accounts: {
