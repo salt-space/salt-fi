@@ -26,14 +26,46 @@ export function select<Value>(opts: p.SelectOptions<Value> & { escAction?: strin
 }
 
 /**
- * Clip a live spinner message to one terminal line. clack wraps a spinner message at
- * the width it read when the spinner started and redraws that many lines; if the line
- * wraps differently (a narrow pane, a resize) every frame stacks up on screen. Final
- * stop lines aren't redrawn, so they can wrap.
+ * Clip a live spinner message to one terminal line. Before each frame clack rubs out as
+ * many lines as the message alone takes, but draws the frame (`◒  `) before it and up to
+ * three dots after; if those push the line over the edge it wraps, and every frame
+ * stacks up on screen. So leave room for both, plus a column spare. Final stop lines
+ * aren't redrawn, so they can wrap.
  */
 export function oneLine(msg: string, columns = process.stdout.columns ?? 80): string {
-  const max = columns - 4;
+  const max = columns - 7;
   return msg.length > max ? `${msg.slice(0, Math.max(1, max - 1))}…` : msg;
+}
+
+/**
+ * Wrap a note's text to the terminal before clack does. clack wraps a long line where it
+ * falls, carrying spaces onto the next line and losing its indent. Here each line keeps
+ * its indent, and the rest of a bullet (`· `) or an amount (`$10.26  `) hangs under its
+ * text. Lines are 76 characters at most, so a wide terminal doesn't make them hard to read.
+ */
+export function fitNote(text: string, columns = process.stdout.columns ?? 80): string {
+  const width = Math.max(20, Math.min(columns - 6, 76)); // clack's note box takes 6 columns
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      if (line.length <= width) return [line];
+      const lead = /^\s*(?:· |\$\S+\s+)?/.exec(line)?.[0] ?? "";
+      const out: string[] = [];
+      let current = lead;
+      let empty = true;
+      for (const word of line.slice(lead.length).split(/\s+/).filter(Boolean)) {
+        if (!empty && current.length + 1 + word.length > width) {
+          out.push(current);
+          current = " ".repeat(lead.length);
+          empty = true;
+        }
+        current += empty ? word : ` ${word}`;
+        empty = false;
+      }
+      out.push(current);
+      return out;
+    })
+    .join("\n");
 }
 
 /**

@@ -8,7 +8,7 @@ import { rpcUrl } from "../chains.js";
 import { network } from "../env.js";
 import { supportsFees } from "../fees.js";
 import { getTokenPriceUsd, LIFI_NATIVE_TOKEN } from "../lifi.js";
-import { oneLine } from "../prompts.js";
+import { fitNote, oneLine } from "../prompts.js";
 import { markStep } from "./state.js";
 
 /**
@@ -72,7 +72,7 @@ export async function fundingStep(salt: Salt, desk: string, address: `0x${string
     return false;
   }
   const want = ethToAskFor(total, ethUsd);
-  s.stop(`Setup costs about $${total.toFixed(2)}, which is ${formatEther(want)} ETH at $${ethUsd.toFixed(0)}/ETH (with a 10% margin)`);
+  s.stop(`Setup costs about $${total.toFixed(2)} (ETH is $${ethUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })} today)`);
 
   if (balance !== undefined && balance >= want) {
     p.log.success(`Your address already holds ${formatEther(balance)} ETH on Ethereum: enough.`);
@@ -80,28 +80,35 @@ export async function fundingStep(salt: Salt, desk: string, address: `0x${string
     return true;
   }
 
-  p.note(lines.map((l) => `${l.what.padEnd(56)} $${l.usd.toFixed(2)}`).join("\n"), "What the ETH pays for");
+  const usd = lines.map((l) => `$${l.usd.toFixed(2)}`);
+  const pad = Math.max(...usd.map((u) => u.length)) + 2;
+  p.note(
+    fitNote([...lines.map((l, i) => `${usd[i].padEnd(pad)}${l.what}`), "", "The amount to send adds 10%, in case prices move."].join("\n")),
+    "What the ETH pays for",
+  );
   const qr = await QRCode.toString(address, { type: "terminal", small: true });
   console.log(`\n${qr}`);
   p.note(
-    [
-      `Send ${formatEther(want)} ETH (about $${(Number(formatEther(want)) * ethUsd).toFixed(2)}) to:`,
+    fitNote([
+      `Send ${formatEther(want)} ETH (about $${(Number(formatEther(want)) * ethUsd).toFixed(2)}) to this address, on the Ethereum network:`,
       "",
       `  ${address}`,
       "",
-      "on the Ethereum network (also called Ethereum mainnet or ERC-20). The QR code above is",
-      "the same address. Ways to do it in the US:",
-      "  · Coinbase: buy ETH, then Send it to this address, network Ethereum",
-      "  · Robinhood, PayPal or Venmo: buy ETH, then transfer it to an external wallet (Ethereum)",
+      `The QR code above is the same address. Exchanges may call the network "Ethereum", "Ethereum mainnet" or "ERC-20".`,
+      "",
+      "Ways to do it in the US:",
+      "  · Coinbase: buy ETH, then Send it to this address on Ethereum",
+      "  · Robinhood, PayPal or Venmo: buy ETH, then send it to this address",
       "  · any other wallet or exchange you already use",
       "",
-      "This is setup money only. The money your agent trades with goes into your account later,",
-      "after you've approved its policies.",
-    ].join("\n"),
+      "This is setup money only. The money your agent trades with goes into your account later, after you've approved its policies.",
+      "",
+      "You can close salt-fi while you wait. Sign in to your desk again and setup picks up here.",
+    ].join("\n")),
     "Fund your desk (the one step you do yourself)",
   );
 
-  s.start(oneLine(`Waiting for ${formatEther(want)} ETH to arrive at ${address} (checking every 15 seconds; you can close this and come back)`));
+  s.start(oneLine(`Waiting for ${formatEther(want)} ETH to arrive (checked every 15 s)`));
   const deadline = Date.now() + 60 * 60_000;
   while (Date.now() < deadline) {
     const now = await ethereum.getBalance({ address }).catch(() => undefined);
@@ -110,7 +117,7 @@ export async function fundingStep(salt: Salt, desk: string, address: `0x${string
       markStep(desk, "funded");
       return true;
     }
-    if (now !== undefined && now > 0n) s.message(oneLine(`Received ${formatEther(now)} of ${formatEther(want)} ETH so far; waiting for the rest`));
+    if (now !== undefined && now > 0n) s.message(oneLine(`Received ${formatEther(now)} of ${formatEther(want)} ETH; waiting for the rest`));
     await new Promise((r) => setTimeout(r, 15_000));
   }
   s.stop("Still waiting after an hour");

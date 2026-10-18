@@ -17,7 +17,7 @@ import {
 } from "../src/aleph/client.js";
 import { creditsFor } from "../src/aleph/credits.js";
 import { deriveSshKey } from "../src/aleph/ssh-key.js";
-import { oneLine } from "../src/prompts.js";
+import { fitNote, oneLine } from "../src/prompts.js";
 
 // The Aleph Cloud robo hosting pieces that don't need the network: the SSH key, node ranking, the
 // VM records, which wallet may be the Aleph wallet, and reading a payment's credits.
@@ -172,7 +172,32 @@ describe("oneLine", () => {
   it("leaves a message that fits alone, and clips one that doesn't to the terminal width with an ellipsis", () => {
     expect(oneLine("short", 80)).toBe("short");
     const clipped = oneLine("x".repeat(200), 40);
-    expect(clipped).toHaveLength(36);
+    expect(clipped).toHaveLength(33);
     expect(clipped.endsWith("…")).toBe(true);
+    // with the spinner's frame before it and its dots after, the line still fits
+    expect(`◒  ${clipped}...`.length).toBeLessThan(40);
+  });
+});
+
+describe("fitNote", () => {
+  const text = [
+    "Send 0.007 ETH (about $16.87) to this address, on the Ethereum network:",
+    "",
+    "  · Robinhood, PayPal or Venmo: buy ETH, then send it to this address",
+    "$10.26  Robo Guardian VM on Aleph Cloud, first month",
+  ].join("\n");
+
+  it("leaves text that fits alone", () => {
+    expect(fitNote(text, 120)).toBe(text);
+  });
+
+  it("wraps to the box's width, keeping indents and hanging bullets and amounts under their text", () => {
+    const lines = fitNote(text, 40).split("\n");
+    expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(34);
+    expect(lines.filter((l) => l && !l.startsWith(" ")).every((l) => !l.endsWith(" "))).toBe(true);
+    expect(lines.slice(0, 3)).toEqual(["Send 0.007 ETH (about $16.87) to", "this address, on the Ethereum", "network:"]);
+    expect(lines.slice(4, 7)).toEqual(["  · Robinhood, PayPal or Venmo:", "    buy ETH, then send it to this", "    address"]);
+    expect(lines.at(-2)).toBe("$10.26  Robo Guardian VM on Aleph");
+    expect(lines.at(-1)).toBe("        Cloud, first month");
   });
 });
