@@ -17,7 +17,7 @@ describe("createdAtFromId", () => {
 
   it("gives no date for an id that isn't an ObjectId", () => {
     expect(createdAtFromId("org-123")).toBeUndefined();
-    expect(createdAtFromId("6ad390af06151f124f47349")).toBeUndefined(); // 23 characters
+    expect(createdAtFromId("6acf96200123456789abcde")).toBeUndefined(); // 23 characters
   });
 
   it("gives no date for an implausible time", () => {
