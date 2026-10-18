@@ -17,6 +17,19 @@ const ACCESS_LEVEL_OPTIONS = [
   { value: "agent" as const, label: "Agent" },
 ];
 
+/**
+ * When an organisation was created. The SDK's Organisation has no creation date (it carries id,
+ * name, collaborators, lastUpdated and termsAcceptedVersion), but Salt's organisation ids are
+ * MongoDB ObjectIds, whose first 4 bytes are the creation time in Unix seconds. Undefined for an id
+ * that isn't an ObjectId, or whose time is implausible (before 2020 or in the future).
+ */
+export function createdAtFromId(id: string): Date | undefined {
+  if (!/^[0-9a-f]{24}$/i.test(id)) return undefined;
+  const ms = Number.parseInt(id.slice(0, 8), 16) * 1000;
+  if (ms < Date.UTC(2020, 0, 1) || ms > Date.now() + 86_400_000) return undefined;
+  return new Date(ms);
+}
+
 export async function listOrganisations(salt: Salt, selfAddress: string): Promise<void> {
   const s = p.spinner();
   s.start("Fetching organisations");
@@ -33,7 +46,9 @@ export async function listOrganisations(salt: Salt, selfAddress: string): Promis
     for (const org of organisations) {
       const self = org.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
       const role = self ? (ACCESS_LEVEL_LABEL[self.accessLevel] ?? String(self.accessLevel)) : "unknown";
-      p.log.message(`${org.name}  (${org.id})\n  your role: ${role}  •  collaborators: ${org.collaborators.length}`);
+      const created = createdAtFromId(org.id);
+      const when = created ? `  •  created ${created.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : "";
+      p.log.message(`${org.name}  (${org.id})\n  your role: ${role}  •  collaborators: ${org.collaborators.length}${when}`);
     }
   } catch (err) {
     s.stop("Failed to fetch organisations");
