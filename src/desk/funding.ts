@@ -85,7 +85,7 @@ export async function fundingStep(salt: Salt, desk: string, address: `0x${string
   console.log(`\n${qr}`);
   p.note(
     [
-      `Send ${formatEther(want)} ETH to:`,
+      `Send ${formatEther(want)} ETH (about $${(Number(formatEther(want)) * ethUsd).toFixed(2)}) to:`,
       "",
       `  ${address}`,
       "",
