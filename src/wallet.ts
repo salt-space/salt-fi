@@ -5,13 +5,16 @@ import { env, network } from "./env.js";
 import { ledgerAccount, usbConnection } from "./ledger.js";
 
 /**
- * The signer's wallet, keyed by `SIGNER`: a raw key from PRIVATE_KEY, or a Ledger.
+ * The signer's wallet, keyed by `SIGNER`: a raw key from PRIVATE_KEY, or a Ledger, or (with no
+ * key in .env) a trading desk owner's key unlocked on this machine and passed in as `desk`.
  * Either way the Salt SDK only asks it for signatures — EIP-191 messages and
  * EIP-712 typed data — never for key material.
  */
-export async function createSaltWalletClient() {
+export async function createSaltWalletClient(desk?: LocalAccount) {
   let account: LocalAccount;
-  if (env.signer === "ledger") {
+  if (desk) {
+    account = desk;
+  } else if (env.signer === "ledger") {
     const path = env.ledgerPath;
     const connection = usbConnection({
       debug: env.ledgerDebug,

@@ -71,3 +71,75 @@ Both hosting paths work:
 - **Accounts require at least 2 collaborators** on the org (owner + 1) before
   they can be created — invite a second member first if starting fresh.
 - The largest account configuration uses up to 3 Robo Guardian signers.
+
+## Trading desk (in progress on `feat/trading-desk`)
+
+"Set up my trading desk": someone who isn't a coder and has no wallet gives this
+repo to their own AI agent, and salt-fi sets up an organisation, Robo Guardians
+on Aleph Cloud, and an account with a trading agent on it. The agent pitches a
+trading strategy; the owner turns it into policies, and approves them, before
+funding the account the agent trades from. Venue and chain follow the strategy.
+The owner's only manual steps: choose a passphrase, write down the recovery
+phrase, send ETH to one address, and the approvals only an owner should make.
+
+**Roles. The separation is the point of the design:**
+- **Owner** (the person): a 12-word recovery phrase, encrypted with their
+  passphrase (scrypt N=2^17, AES-256-GCM) in `~/.salt-fi/desks/<desk>/owner.json`.
+  Creates the organisation, activates the robos (2FA), seals policies, enables
+  or stops the agent, funds the account.
+- **Trading agent**: its own key, `agent.json` (plain, 0600). Proposes only;
+  joins the organisation as an agent (access level 3, being renamed Delegate).
+- **Robo Guardian**: on an Aleph Cloud VM the owner pays for. Co-signs only
+  within policy.
+- **Account**: owner + agent + robo. Owner and agent keys together could sign
+  around the robo and the policies, so **an AI assistant must never see, ask
+  for, store or type the owner's passphrase or recovery phrase.** Owner-only
+  steps are hand-off points the person does themselves.
+- **Setup money**: ETH on Ethereum to the owner's address. It pays for Aleph
+  credits (bought with ETH on Ethereum), Salt's fees (USDC only, so part is
+  converted) and gas. Trading money goes into the account only after the
+  policies are sealed.
+
+**Done (Phase 1):** `src/desk/keystore.ts` (keys), `state.ts` (`desk.json`:
+progress by step, so setup resumes), `start.ts` (no `PRIVATE_KEY` and no
+Ledger → set up, restore or unlock a desk; the recovery phrase shows on the
+terminal's alternate screen, then a two-word check), `funding.ts` (budget,
+amount of ETH, QR code, waits for it to arrive). Wired in `src/app.ts`;
+`createSaltWalletClient(desk?)` in `src/wallet.ts` takes the unlocked owner.
+Tests: `test/desk-keystore.test.ts`, `test/desk-setup.test.ts`.
+
+**Next:**
+- **Phase 2, setup flow** (resumable through `desk.json` steps `organisation`,
+  `agent-invited`, `agent-joined`, `robos`, `robos-activated`, `account`):
+  create the organisation as the owner; invite the agent's address as an agent
+  and accept with the agent's key; host a robo on Aleph with the owner's key as
+  the Aleph wallet (the Aleph command reads `PRIVATE_KEY` from `.env` today:
+  pass the desk owner's account instead); owner activates the robo (hand-off);
+  create the account (owner + agent + robo).
+- **Phase 3, strategy → policies:** the agent writes a strategy file (venue,
+  chain, contracts, functions, limits); salt-fi turns it into policies
+  (`allowed_recipients`, `transaction_limit_token_denominated`,
+  `contract_param_restriction`, and `denied_proposers` as the agent's off
+  switch), explains each in plain English, and the owner seals them, then
+  funds the account. Builds on PR #49 (contract restriction checks). It is
+  open, predates SDK 0.0.44 and needs review. Undecided: bring #49 up to date
+  and merge it first, or build on its branch.
+- **Phase 4:** a field guide for the person's AI agent, non-interactive agent
+  commands (propose a trade with the agent's key, status), and converting ETH
+  to USDC for Salt's fees.
+
+**Limits to keep in view:**
+- `nominated_approvers` isn't implemented in 0.0.44 (the SDK refuses it).
+- Calls whose arguments are structs or bytes (Uniswap V3 `exactInput`,
+  Universal Router `execute`) can't be restricted by argument; #49 refuses
+  tuple and array arguments.
+- Hyperliquid orders are signed messages, not transactions: check whether
+  Salt's policies see them before offering it as a venue.
+- Fiat on-ramps (Coinbase Onramp, MoonPay, Stripe, Transak) need a business
+  account and server keys, so for now: the address, a QR code and US options.
+
+**Testing:** where `.env` holds a real key, run unit tests only
+(`npx vitest run --exclude '**/*.integration.test.ts'`); integration tests sign
+in. `SALT_DESK_DIR` moves desks to a scratch directory. The prompts can be
+driven in a pseudo-terminal with `expect`; give it a width
+(`set stty_init "columns 120 rows 40"`) or clack wraps every character.

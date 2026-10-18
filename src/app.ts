@@ -5,6 +5,9 @@ import { findLedgerError } from "./ledger.js";
 import { runMenu } from "./menu.js";
 import { loadSalt } from "./session.js";
 import { createSaltWalletClient, type SaltWalletClient } from "./wallet.js";
+import { chooseDeskIdentity, type DeskIdentity } from "./desk/start.js";
+import { fundingStep } from "./desk/funding.js";
+import { readDeskState } from "./desk/state.js";
 
 /**
  * Runs the app for the already-selected environment. Imported dynamically from
@@ -31,10 +34,22 @@ export async function runApp(): Promise<void> {
         "confirm when signing in (unless a saved session is still valid) and once for each account ceremony (create, send, sign, swap…).",
     );
   }
-  const signedIn = await signIn(onLedger);
+  // No key in .env and no Ledger: sign in as a trading desk's owner (or set one up).
+  let desk: DeskIdentity | undefined;
+  if (!onLedger && !process.env.PRIVATE_KEY) {
+    desk = await chooseDeskIdentity();
+    if (!desk) {
+      p.outro("Cancelled.");
+      return;
+    }
+  }
+  const signedIn = await signIn(onLedger, desk?.account);
   if (!signedIn) {
     p.outro("Cancelled.");
     return;
+  }
+  if (desk && !readDeskState(desk.desk)?.steps.funded) {
+    await fundingStep(signedIn.salt, desk.desk, desk.account.address);
   }
 
   await runMenu(signedIn.salt, signedIn.walletClient);
@@ -47,14 +62,14 @@ export async function runApp(): Promise<void> {
  * exiting, defaulting to "no" after a rejection since that's usually deliberate.
  * Returns undefined if the person stops there.
  */
-async function signIn(onLedger: boolean): Promise<{ salt: Salt; walletClient: SaltWalletClient } | undefined> {
+async function signIn(onLedger: boolean, deskAccount?: DeskIdentity["account"]): Promise<{ salt: Salt; walletClient: SaltWalletClient } | undefined> {
   // Created once and kept across retries: it holds the device connection.
   let walletClient: SaltWalletClient | undefined;
   while (true) {
     const s = p.spinner();
     s.start(`Signing in to ${network.label}${onLedger ? " (confirm on your Ledger if it asks)" : ""}`);
     try {
-      walletClient ??= await createSaltWalletClient();
+      walletClient ??= await createSaltWalletClient(deskAccount);
       const { salt, savedSession } = await loadSalt(walletClient);
       s.stop(`Signed in as ${walletClient.account.address} · ${network.label}${savedSession ? " (saved session)" : ""}`);
       return { salt, walletClient };
