@@ -209,7 +209,11 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
     if ((await roboOnlineCount()) > 0) {
       p.log.success("At least one Robo Guardian is already online.");
     } else {
-      const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, ownedOrgs.find((o) => o.id === organisationId)?.name ?? "your organisation");
+      // An organisation created in step 1 isn't in `ownedOrgs` (read before it existed), so ask Salt.
+      const organisationName =
+        ownedOrgs.find((o) => o.id === organisationId)?.name ??
+        (await salt.getOrganisationById(organisationId).then((r) => r.organisation.name).catch(() => "your organisation"));
+      const roboSetUp = await setUpRoboHost(salt, walletClient, organisationId, organisationName);
       // Escaping robo setup should leave the wizard entirely, not fall through to
       // polling for robos that were never set up.
       if (!roboSetUp) return;

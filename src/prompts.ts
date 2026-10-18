@@ -26,6 +26,17 @@ export function select<Value>(opts: p.SelectOptions<Value> & { escAction?: strin
 }
 
 /**
+ * Clip a live spinner message to one terminal line. clack wraps a spinner message at
+ * the width it read when the spinner started and redraws that many lines; if the line
+ * wraps differently (a narrow pane, a resize) every frame stacks up on screen. Final
+ * stop lines aren't redrawn, so they can wrap.
+ */
+export function oneLine(msg: string, columns = process.stdout.columns ?? 80): string {
+  const max = columns - 4;
+  return msg.length > max ? `${msg.slice(0, Math.max(1, max - 1))}…` : msg;
+}
+
+/**
  * Prompt for a token amount, accepting either a number or the words `max` / `all`
  * (case-insensitive) to mean the entire available balance. Returns the amount in
  * the token's smallest unit (wei), or `null` if the user cancels.

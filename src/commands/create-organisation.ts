@@ -4,6 +4,7 @@ import type { RoboHost, Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { pickOrganisation, select } from "../prompts.js";
 import type { SaltWalletClient } from "../wallet.js";
+import { alephRoboFlow } from "./aleph-robo.js";
 
 function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "org";
@@ -109,7 +110,8 @@ export async function setUpRoboFlow(salt: Salt, walletClient: SaltWalletClient):
 
 /**
  * Registers a Robo Guardian host for an organisation and hands back either a
- * self-hosted install script or a CloudFormation launch URL. Exported so it can
+ * self-hosted install script or a CloudFormation launch URL, or (experimental)
+ * creates an Aleph Cloud VM and runs the script on it. Exported so it can
  * be run for an *existing* org (menu: Robo Guardians → Set up Robo Guardians)
  * and from the getting-started wizard, not just at org-creation time.
  *
@@ -205,6 +207,11 @@ export async function setUpRoboHost(
         label: "AWS CloudFormation (one-click launch)",
         hint: "opens a pre-filled AWS console URL — confirm with \"Check robo status\" once launched",
       },
+      {
+        value: "aleph",
+        label: "Aleph Cloud VM (experimental)",
+        hint: "creates a pay-as-you-go VM and runs the script on it — needs an Aleph wallet with credits",
+      },
     ],
   });
   if (p.isCancel(method)) return false;
@@ -225,6 +232,11 @@ export async function setUpRoboHost(
   const filename = `robo-setup-${slugify(organisationName)}-${organisationId}.sh`;
   const roboName = host.name ?? `${organisationName} Robos`;
   fs.writeFileSync(filename, withOrgHeader(script, organisationName, organisationId, roboName), { mode: 0o600 });
+
+  if (method === "aleph") {
+    p.log.info(`Wrote ${filename} (holds the one-time OTP; gitignored). It's copied to the VM, run there, then removed from the VM.`);
+    return await alephRoboFlow(salt, walletClient, { organisationId, organisationName, scriptPath: filename, roboName });
+  }
 
   p.log.success(
     `Wrote ${filename} (contains a secret OTP / one-time password — already gitignored, treat it like a credential).\n\n` +
