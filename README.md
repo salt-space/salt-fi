@@ -294,6 +294,13 @@ Creating an account and sending a transaction can cost a small fee; see
   — there's no timeout for a party that never shows up in the huddle
   (`timeoutMs` on account creation only bounds keygen rounds *after*
   everyone's present, not the wait for presence itself).
+  For an organisation owner it also says whether Salt holds the robos'
+  encrypted seed backup.
+- **Back up robo seed** — save the robo host's encrypted seed backup from
+  Salt to `robo-seed-<organisation id>.json` (gitignored, readable only by
+  you). The seed derives all of the host's signer keys, so this file plus
+  your wallet's private key can rebuild the same robos on a new machine if
+  theirs is lost. Owners only, and salt-fi never decrypts it.
 - **Aleph Cloud (experimental)** — host a robo on a pay-as-you-go
   [Aleph Cloud](https://aleph.cloud) VM without running a server yourself.
   Choose "Aleph Cloud VM" when setting up Robo Guardians and the app creates
