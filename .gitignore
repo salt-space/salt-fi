@@ -10,6 +10,7 @@ dist/
 .hyperliquid-agents.json
 .hyperliquid-delta-neutral*.json
 robo-setup-*.sh
+robo-seed-*.json
 
 # pre-signed fee payments (anyone holding the file can spend them)
 .fee-stash.*.json
