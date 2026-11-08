@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "salt-sdk";
+import type { Salt, SaltAccount } from "salt-sdk";
 import { backupStatusLabel, verifyKeyshareBackup } from "../backup-status.js";
 import { reportError } from "../errors.js";
 import { approvingMessage, keyshareBackupSigner, UNUSED_APPROVAL_WARNING } from "../keyshare-backup.js";
@@ -7,6 +7,7 @@ import { findLedgerError } from "../ledger.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, renderSignerList, select } from "../prompts.js";
 import { ensureSignerPublicKey } from "../session.js";
 import { ensureSignerReachable, type SaltWalletClient } from "../wallet.js";
+import { createdAtFromId } from "./organisations.js";
 
 export async function listAccounts(salt: Salt): Promise<void> {
   const organisationId = await pickOrganisation(salt, "List accounts for which organisation?");
@@ -14,26 +15,53 @@ export async function listAccounts(salt: Salt): Promise<void> {
 
   const s = p.spinner();
   s.start("Fetching accounts");
+  let accounts;
   try {
-    const accounts = await salt.getAccounts(organisationId);
-    s.stop(`Found ${accounts.length} account(s)`);
-
-    if (accounts.length === 0) {
-      p.log.info("No accounts in this organisation yet.");
-      return;
-    }
-
-    for (const account of accounts) {
-      // `backupStatusLabel` reads the account's publicKey + keyshares map — the
-      // typed replacement for the removed `keysharesBackedUp` response field.
-      p.log.message(
-        `${account.name}  (${account.id})\n  address: ${account.evmAddress ?? "pending setup"}\n  backup: ${backupStatusLabel(account)}`,
-      );
-    }
+    accounts = await salt.getAccounts(organisationId);
   } catch (err) {
     s.stop("Failed to fetch accounts");
     reportError(err);
+    return;
   }
+
+  const { ready, unfinished } = splitBySetup(accounts);
+  s.stop(`Found ${ready.length} account(s)${unfinished.length ? `, plus ${unfinished.length} whose setup didn't finish` : ""}`);
+  if (accounts.length === 0) {
+    p.log.info("No accounts in this organisation yet.");
+    return;
+  }
+
+  for (const account of ready) p.log.message(accountSummary(account));
+  if (unfinished.length === 0) return;
+
+  // Hidden unless asked for: worth a look when something's gone wrong, or to check on one you've paid for.
+  const show = await p.confirm({
+    message:
+      unfinished.length === 1
+        ? "Show the account whose setup didn't finish?"
+        : `Show the ${unfinished.length} accounts whose setup didn't finish?`,
+    initialValue: false,
+  });
+  if (p.isCancel(show) || !show) return;
+  for (const account of unfinished) p.log.message(accountSummary(account));
+}
+
+/** Accounts that finished setup (they have an address), and those that didn't and so can't be used. */
+export function splitBySetup<A extends Pick<SaltAccount, "evmAddress">>(accounts: readonly A[]): { ready: A[]; unfinished: A[] } {
+  return {
+    ready: accounts.filter((a) => Boolean(a.evmAddress)),
+    unfinished: accounts.filter((a) => !a.evmAddress),
+  };
+}
+
+/** An account's entry in List accounts; one whose setup didn't finish also says when it started. */
+export function accountSummary(account: Pick<SaltAccount, "id" | "name" | "evmAddress" | "publicKey" | "keyshares" | "signers">): string {
+  // `backupStatusLabel` reads the account's publicKey + keyshares map — the
+  // typed replacement for the removed `keysharesBackedUp` response field.
+  const lines = [`${account.name}  (${account.id})`, `  address: ${account.evmAddress ?? "pending setup"}`, `  backup: ${backupStatusLabel(account)}`];
+  const started = account.evmAddress ? undefined : createdAtFromId(account.id);
+  if (started) lines.push(`  setup started: ${started.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`);
+  return lines.join("\n");
 }
 
 /** The Salt API's rules for an account name (UpdateAccountParams): trimmed, not blank, no angle brackets, at most 50 characters. */
@@ -70,9 +98,10 @@ export async function renameAccountFlow(salt: Salt, walletClient: SaltWalletClie
     return;
   }
 
+  const { ready, unfinished } = splitBySetup(accounts);
   const accountId = await select({
     message: "Which account?",
-    options: accounts.map((a) => ({ value: a.id, label: a.name, hint: a.evmAddress ?? "pending setup" })),
+    options: [...ready, ...unfinished].map((a) => ({ value: a.id, label: a.name, hint: a.evmAddress ?? "pending setup" })),
   });
   if (p.isCancel(accountId)) return;
   const account = accounts.find((a) => a.id === accountId)!;
