@@ -3,6 +3,7 @@ import type { Salt } from "salt-sdk";
 import { env, network } from "./env.js";
 import { findLedgerError } from "./ledger.js";
 import { runMenu } from "./menu.js";
+import { setSignedInAddress } from "./prompts.js";
 import { loadSalt } from "./session.js";
 import { createSaltWalletClient, type SaltWalletClient } from "./wallet.js";
 
@@ -36,6 +37,7 @@ export async function runApp(): Promise<void> {
     p.outro("Cancelled.");
     return;
   }
+  setSignedInAddress(signedIn.walletClient.account.address);
 
   await runMenu(signedIn.salt, signedIn.walletClient);
   signedIn.salt.disconnect();

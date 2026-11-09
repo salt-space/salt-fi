@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "salt-sdk";
+import type { Organisation, Salt } from "salt-sdk";
 import { styleText } from "node:util";
 import { formatUnits, parseUnits } from "viem";
 import { reportError } from "./errors.js";
@@ -7,7 +7,7 @@ import { reportError } from "./errors.js";
 export const ACCESS_LEVEL_LABEL: Record<number, string> = {
   1: "owner",
   2: "member",
-  3: "agent",
+  3: "delegate",
   4: "member (no permissions)",
 };
 
@@ -78,6 +78,27 @@ export async function promptTokenAmount(opts: {
   return isMax(input) ? maxRaw : parseUnits(input, decimals);
 }
 
+/**
+ * The signed-in wallet, so the organisation picker can show your own standing in
+ * each organisation. Set once at sign-in (app.ts).
+ */
+let signedInAddress: string | undefined;
+
+export function setSignedInAddress(address: string): void {
+  signedInAddress = address.toLowerCase();
+}
+
+/** `address`'s status in `org` (Active, Suspended…), or undefined if it isn't one of its collaborators. */
+export function ownStatus(org: Pick<Organisation, "collaborators">, address: string | undefined) {
+  if (!address) return undefined;
+  return org.collaborators.find((m) => m.address.toLowerCase() === address.toLowerCase())?.status;
+}
+
+/**
+ * Pick one of your organisations. getOrganisations still lists one you're suspended in,
+ * but Salt refuses everything inside it with a bare 403 ("unauthorized:no-role"), so
+ * the list marks it and choosing it stops here with the reason instead.
+ */
 export async function pickOrganisation(salt: Salt, message: string): Promise<string | undefined> {
   let organisations;
   try {
@@ -94,10 +115,21 @@ export async function pickOrganisation(salt: Salt, message: string): Promise<str
 
   const organisationId = await select({
     message,
-    options: organisations.map((org) => ({ value: org.id, label: org.name })),
+    options: organisations.map((org) => {
+      const status = ownStatus(org, signedInAddress);
+      return { value: org.id, label: org.name, hint: status && status !== "Active" ? `you're ${status.toLowerCase()}` : undefined };
+    }),
   });
 
   if (p.isCancel(organisationId)) return undefined;
+  const org = organisations.find((o) => o.id === organisationId)!;
+  if (ownStatus(org, signedInAddress) === "Suspended") {
+    p.log.warn(
+      `You're suspended in ${org.name}, so Salt won't let you do anything in it. ` +
+        "An owner has to restore you (Organisation → Manage collaborators → Restore).",
+    );
+    return undefined;
+  }
   return organisationId;
 }
 

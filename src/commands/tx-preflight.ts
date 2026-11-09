@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import type { Policy, Salt } from "salt-sdk";
 import { type Address, type PublicClient } from "viem";
 import { formatSaltError, txHashFromError } from "../errors.js";
-import { policyCheckGasFields, POLICY_TYPE_LABEL } from "../policies.js";
+import { chainLabel, policyCheckGasFields, POLICY_TYPE_LABEL } from "../policies.js";
 import type { SaltWalletClient } from "../wallet.js";
 
 /**
@@ -163,7 +163,9 @@ export async function resolvePolicies(
   const applicable = dedupeById(results.flatMap((r) => r.check.networkPolicies));
   if (applicable.length > 0) {
     p.note(
-      applicable.map((pol) => `${rejectedIds.has(pol.id) ? "✗" : "✓"} ${POLICY_TYPE_LABEL[pol.type] ?? pol.type}`).join("\n"),
+      applicable
+        .map((pol) => `${rejectedIds.has(pol.id) ? "✗" : "✓"} ${POLICY_TYPE_LABEL[pol.type] ?? pol.type} · ${chainLabel(pol.chain)}`)
+        .join("\n"),
       `Account policies that apply to this ${operation}`,
     );
   }
@@ -183,17 +185,20 @@ export async function resolvePolicies(
   }
 
   // Only allowed-recipients blocks remain. A rejected tx's `to` is the address
-  // that whitelist is missing — collect them per blocking policy.
+  // that whitelist is missing — collect them per blocking policy. Salt checks this
+  // chain's whitelist and the "*" one as a single combined list, so a breach names
+  // both but adding the address to either is enough: prefer this chain's own,
+  // which doesn't widen what's allowed on every other chain.
   const fixes = new Map<string, { policy: Policy; additions: { address: string; nickname: string }[] }>();
   for (const { tx, check } of results) {
-    for (const pol of check.rejectedPolicies) {
-      if (pol.type !== "allowed_recipients") continue;
-      const entry = fixes.get(pol.id) ?? { policy: pol, additions: [] };
-      if (!entry.additions.some((a) => a.address.toLowerCase() === tx.to.toLowerCase())) {
-        entry.additions.push({ address: tx.to, nickname: tx.whitelistNickname });
-      }
-      fixes.set(pol.id, entry);
+    const whitelists = check.rejectedPolicies.filter((pol) => pol.type === "allowed_recipients");
+    const pol = whitelists.find((w) => w.chain === chainId) ?? whitelists[0];
+    if (!pol) continue;
+    const entry = fixes.get(pol.id) ?? { policy: pol, additions: [] };
+    if (!entry.additions.some((a) => a.address.toLowerCase() === tx.to.toLowerCase())) {
+      entry.additions.push({ address: tx.to, nickname: tx.whitelistNickname });
     }
+    fixes.set(pol.id, entry);
   }
 
   const neededList = [

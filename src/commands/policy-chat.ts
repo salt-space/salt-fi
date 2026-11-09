@@ -16,11 +16,12 @@ const SYSTEM_PROMPT = `You are a policy assistant embedded in "salt-fi", a termi
 
 # How Salt policies work
 
-A policy is attached to one account and one chain, and constrains which transactions that account can make. There are six policy types; each carries exactly ONE params member:
+A policy is attached to one account and one chain, and constrains which transactions that account can make. There are seven policy types; each carries exactly ONE params member:
 
 - allowed_recipients — { recipients: [{ address, nickname? }] }. A whitelist: only these addresses may RECEIVE funds; a transfer to any other address is a breach.
 - denied_recipients — { recipients: [...] }. These addresses may NOT receive funds. If an address is on both allowed and denied lists, denied wins.
 - denied_proposers — { recipients: [...] }. IMPORTANT QUIRK: for legacy reasons the addresses live under the "recipients" key, but they are matched against the transaction's PROPOSER (the human signer initiating the transfer), not the recipient. This is what blocks a signer from initiating transfers out of the account.
+- denied_message_proposers — { recipients: [...] }. Like denied_proposers, but for message signatures (personal_sign and typed data) instead of transactions: the listed signers may not request one from the account. Chain must be "*" (a message has no chain). New accounts start with one listing every human signer, so nobody can sign messages until an owner removes them from it. The account paying one of Salt's own fees is exempt.
 - transaction_limit_token_denominated — { limits: [{ address, amount, isWarningSuppressed? }] }. Caps the amount a SINGLE transaction may transfer, per token. "address" is the token contract address; use the zero address (0x0000000000000000000000000000000000000000) for the chain's native asset. "amount" is an integer STRING in the token's base units (wei for 18-decimal tokens; e.g. 1 USDC with 6 decimals = "1000000"). The cap is per-transaction, NOT cumulative across transactions.
 - nominated_approvers — { approvers: [{ address }] }. CANNOT BE CREATED (the API rejects it; not yet implemented / not enforced). Existing ones can be read, updated, or deleted only.
 - contract_param_restriction — { restrictions: [{ contractAddress, functionSignature, paramIndex, operator, value }] }. Restricts the arguments of a contract call. Only applies to transactions calling functionSignature on contractAddress; the decoded argument at paramIndex (zero-based) must satisfy operator/value. functionSignature is human-readable without the "function" keyword, e.g. "transfer(address,uint256)". operator is one of eq, neq, lt, lte, gt, gte — but lt/lte/gt/gte are numeric-only (uint*/int*); address/bool/bytes*/string support only eq/neq. value is an integer string for numeric params, or the literal value (case-insensitive) otherwise. Do NOT supply a solidityType — it's derived automatically.
@@ -28,7 +29,7 @@ A policy is attached to one account and one chain, and constrains which transact
 # Critical rules
 
 - At most ONE policy per (type, chain) on an account. Creating a duplicate fails. To express several constraints of one type, put them all in that single policy's params array.
-- "chain" is a STRING: a numeric chain ID like "11155111", or "*" to apply on every chain. A "*" policy and a specific-chain policy of the same type BOTH apply on that chain.
+- "chain" is a STRING: a numeric chain ID like "11155111", or "*" to apply on every chain. A "*" policy and a specific-chain policy of the same type are checked as ONE combined list on that chain: a "*" whitelist extends the chain's whitelist (an address on either is allowed), and for deny lists, limits and restrictions both sets of entries apply.
 - update_policy REPLACES the params entirely — it is not a patch. To add one recipient to a whitelist, you must resend the full desired recipients array (fetch the current policy first, then send current + new).
 - You cannot change a policy's type or chain via update — delete and recreate instead.
 
@@ -112,6 +113,7 @@ function buildTools(ctx: PolicyChatContext) {
             "allowed_recipients",
             "denied_recipients",
             "denied_proposers",
+            "denied_message_proposers",
             "transaction_limit_token_denominated",
             "contract_param_restriction",
           ],
@@ -121,7 +123,7 @@ function buildTools(ctx: PolicyChatContext) {
         params: {
           type: "object",
           description:
-            "The params object matching the type: {recipients} for allowed/denied recipients & denied_proposers, {limits} for transaction_limit_token_denominated, {restrictions} for contract_param_restriction.",
+            "The params object matching the type: {recipients} for allowed/denied recipients, denied_proposers & denied_message_proposers, {limits} for transaction_limit_token_denominated, {restrictions} for contract_param_restriction.",
         },
       },
       required: ["accountId", "type", "chain", "params"],

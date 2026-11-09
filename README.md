@@ -133,20 +133,22 @@ You'll need these installed on your machine first:
 Testing things like "Invite member" or "Listen for nudges" needs more than one
 signer identity running at the same time (a three-signer account needs three).
 A single shared `.env` won't do it, since editing it in one terminal changes
-the key the other terminals pick up too. Instead, copy `.env.example` to
-`.env.a`, `.env.b`, `.env.c` and `.env.d` (all gitignored), put a different
-`PRIVATE_KEY` in each, and run one identity per terminal:
+the key the other terminals pick up too. Instead, make a profile per identity:
+copy `.env.example` to `.env.<name>` (any name; all gitignored), put a different
+`PRIVATE_KEY` in each, and run one identity per terminal by naming its profile:
 
 ```
-npm run dev:a   # uses .env.a
-npm run dev:b   # uses .env.b
-npm run dev:c   # uses .env.c
-npm run dev:d   # uses .env.d
+npm run dev a           # uses .env.a
+npm run dev fee-tester  # uses .env.fee-tester
 ```
 
-These scripts just set `DOTENV_CONFIG_PATH`, which `dotenv/config` (used in
-`src/env.ts`) natively respects to load a file other than `.env`. Any other
-`.env.<name>` works the same way: `DOTENV_CONFIG_PATH=.env.<name> npm run dev`.
+A new `.env.<name>` file works straight away, with no script to add. A name
+with no file stops with a list of the profiles there are, and the app's
+title shows which profile it's running as. The older `npm run dev:a` …
+`npm run dev:d` scripts still work and do the same for `.env.a` … `.env.d`.
+
+Under the hood, the name sets `DOTENV_CONFIG_PATH` (`src/load-profile.ts`), which
+`dotenv/config` respects to load a file other than `.env`.
 A profile can also set `SALT_ENV`, or `SIGNER=ledger`, though only one terminal
 can use a given Ledger at a time. Both
 terminals still share the same session cache file, but since it's keyed by
@@ -164,7 +166,7 @@ Nothing goes on-chain and there's no gas to pay.
 That wallet's address is who you are in Salt:
 
 - **Organisations** invite you by address, and you accept with the same
-  wallet. Your access level (owner, member or agent) is attached to that
+  wallet. Your access level (owner, member or delegate) is attached to that
   address.
 - **Accounts** you co-sign use this wallet in their MPC key-generation and
   signing ceremonies.
@@ -269,7 +271,7 @@ Creating an account and sending a transaction can cost a small fee; see
   are verified correct for testnet, but no one's launched a real stack from
   it yet — more to come).
 - **Invite collaborators** — invite another EVM address into an organisation
-  you pick, with a role label and access level (owner/member/agent). Only
+  you pick, with a role label and access level (owner/member/delegate). Only
   organisation owners can actually do this — the API enforces it.
 - **Manage collaborators** — edit an existing collaborator's display name,
   role label, and access level. Only organisation owners can do this too —
@@ -369,7 +371,8 @@ Creating an account and sending a transaction can cost a small fee; see
 
 - **Manage policies** — form-driven CRUD for an account's transaction
   policies (whitelist / blocklist, denied proposers, per-transaction limits,
-  contract-call restrictions) across chains. List, add, edit, and delete
+  contract-call restrictions) across chains, plus its message-signing policy
+  (denied message proposers). List, add, edit, and delete
   policies via guided prompts, with a few contract-restriction presets (e.g.
   "ERC-20 transfer — only to a specific recipient") to save typing. **No API
   key required** — this is the plain, always-available way to manage
@@ -389,6 +392,18 @@ Creating an account and sending a transaction can cost a small fee; see
 From salt-sdk 0.0.44, your wallet signs every policy change
 (create, edit or delete). The app does this for you with the wallet you signed
 in with; on a Ledger, confirm it on the device.
+
+From salt-sdk 0.0.45, message signatures (Sign message, and the messages that
+Hyperliquid, Turbine and Hinkal sign) are policy-checked like transactions. A
+**denied message proposers** policy lists the signers who may not request one.
+It always applies on all chains (`*`), and accounts created from this release on
+start with one listing every signer, so nobody on a new account can sign
+messages until an owner removes them from it. **Verify account backup** signs
+messages too.
+
+A policy on all chains (`*`) and one on a specific chain, of the same type, are
+checked as one combined list on that chain: an address on either whitelist is
+allowed, and both blocklists, limits and restrictions apply.
 
 ## Fees (x402)
 

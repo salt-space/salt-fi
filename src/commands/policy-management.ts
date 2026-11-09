@@ -6,9 +6,11 @@ import {
   ADDRESS_PATTERN,
   CONTRACT_PRESETS,
   CREATABLE_POLICY_TYPES,
+  MESSAGE_POLICY_TYPES,
   NATIVE_ADDRESS,
   POLICY_OPERATORS,
   POLICY_TYPE_LABEL,
+  PROPOSER_TYPES,
   RECIPIENT_TYPES,
   type ResolveLabel,
   buildResolveLabel,
@@ -253,10 +255,10 @@ async function buildParams(
   type: CreatableType,
   proposerOptions: ProposerOption[] = [],
 ): Promise<Record<string, unknown> | typeof CANCEL | typeof GO_BACK> {
-  // Denied proposers are always the account's own co-signers, so offer them as
-  // a pick-list. Fall back to freeform entry only if the signer set is empty
-  // or unreadable.
-  if (type === "denied_proposers" && proposerOptions.length > 0) {
+  // Denied (message) proposers are always the account's own co-signers, so offer
+  // them as a pick-list. Fall back to freeform entry only if the signer set is
+  // empty or unreadable.
+  if (PROPOSER_TYPES.includes(type) && proposerOptions.length > 0) {
     const recipients = await buildProposers(proposerOptions);
     return recipients === CANCEL ? recipients : { recipients };
   }
@@ -299,6 +301,9 @@ export async function addPolicy(
       type = choice as CreatableType;
     }
 
+    // A message has no chain, so Salt takes message policies only on every chain.
+    if (chain === undefined && MESSAGE_POLICY_TYPES.includes(type)) chain = "*";
+
     if (chain === undefined) {
       const choice = await select({
         message: "Which chain does this policy apply to?",
@@ -312,7 +317,7 @@ export async function addPolicy(
       chain = choice;
     }
 
-    if (type === "denied_proposers" && proposerOptions === undefined) {
+    if (PROPOSER_TYPES.includes(type) && proposerOptions === undefined) {
       proposerOptions = await loadProposerOptions(salt, accountId, resolveLabel);
       if (proposerOptions.length === 0) {
         p.log.info("Couldn't read this account's co-signers — enter proposer addresses manually.");
@@ -322,6 +327,7 @@ export async function addPolicy(
     const built = await buildParams(type, proposerOptions ?? []);
     if (built === GO_BACK) {
       chain = undefined; // back to chain selection
+      if (MESSAGE_POLICY_TYPES.includes(type)) type = undefined; // no chain step to go back to
       continue;
     }
     if (built === CANCEL) return;
@@ -378,7 +384,7 @@ async function editListPolicy(salt: Salt, policy: Policy, resolveLabel: ResolveL
 
   // For a denied-proposers policy, adding entries picks from the account's
   // co-signers rather than freeform address entry (loaded once, on demand).
-  const isProposers = policy.type === "denied_proposers";
+  const isProposers = PROPOSER_TYPES.includes(policy.type);
   let proposerOptions: ProposerOption[] | undefined;
 
   const SAVE = "__save";
@@ -508,10 +514,10 @@ export async function policyManagementFlow(salt: Salt, walletClient: SaltWalletC
 
   const resolveLabel = buildResolveLabel(accounts, organisation.collaborators);
 
-  // Per Salt's access levels (owner/member/agent/member-no-permissions), only
-  // an owner may add/edit/delete policies — member and agent are view-only.
-  // Deliberately not scoping *which* accounts are viewable here (e.g. an
-  // agent's account list) — that's left to the API/server to enforce, so it
+  // Per Salt's access levels (owner/member/delegate/member-no-permissions), only
+  // an owner may add/edit/delete policies — member and delegate are view-only.
+  // Deliberately not scoping *which* accounts are viewable here (e.g. a
+  // delegate's account list) — that's left to the API/server to enforce, so it
   // can be verified independently rather than duplicated client-side.
   const selfAddress = walletClient.account.address;
   const self = organisation.collaborators.find((m) => m.address.toLowerCase() === selfAddress.toLowerCase());
