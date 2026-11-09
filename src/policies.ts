@@ -58,6 +58,7 @@ export const POLICY_TYPE_LABEL: Record<PolicyType, string> = {
   allowed_recipients: "Allowed recipients (whitelist)",
   denied_recipients: "Denied recipients (blocklist)",
   denied_proposers: "Denied proposers",
+  denied_message_proposers: "Denied message proposers",
   transaction_limit_token_denominated: "Per-transaction limit",
   contract_param_restriction: "Contract call restriction",
   nominated_approvers: "Nominated approvers",
@@ -68,6 +69,11 @@ export const CREATABLE_POLICY_TYPES: { value: Exclude<PolicyType, "nominated_app
   { value: "allowed_recipients", label: POLICY_TYPE_LABEL.allowed_recipients, hint: "only these addresses may receive funds" },
   { value: "denied_recipients", label: POLICY_TYPE_LABEL.denied_recipients, hint: "these addresses may not receive funds" },
   { value: "denied_proposers", label: POLICY_TYPE_LABEL.denied_proposers, hint: "these signers may not initiate transfers" },
+  {
+    value: "denied_message_proposers",
+    label: POLICY_TYPE_LABEL.denied_message_proposers,
+    hint: "these signers may not request message signatures (all chains)",
+  },
   {
     value: "transaction_limit_token_denominated",
     label: POLICY_TYPE_LABEL.transaction_limit_token_denominated,
@@ -81,7 +87,21 @@ export const CREATABLE_POLICY_TYPES: { value: Exclude<PolicyType, "nominated_app
 ];
 
 /** Types whose params are a `{ recipients: [...] }` array. */
-export const RECIPIENT_TYPES: PolicyType[] = ["allowed_recipients", "denied_recipients", "denied_proposers"];
+export const RECIPIENT_TYPES: PolicyType[] = [
+  "allowed_recipients",
+  "denied_recipients",
+  "denied_proposers",
+  "denied_message_proposers",
+];
+
+/** Types that list the account's own signers, matched against the proposer rather than a recipient. */
+export const PROPOSER_TYPES: PolicyType[] = ["denied_proposers", "denied_message_proposers"];
+
+/**
+ * Types that govern message signatures rather than transactions. A message has no chain, so
+ * Salt accepts these only on every chain ("*").
+ */
+export const MESSAGE_POLICY_TYPES: PolicyType[] = ["denied_message_proposers"];
 
 export const POLICY_OPERATORS: { value: ContractParamRestrictionOperator; label: string }[] = [
   { value: "eq", label: "eq — equals" },

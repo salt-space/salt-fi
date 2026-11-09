@@ -132,7 +132,7 @@ export async function gettingStartedFlow(salt: Salt, walletClient: SaltWalletCli
       "  can view (not edit) org accounts &\n" +
       "  policies. Can sign on accounts they're\n" +
       "  added to\n\n" +
-      "Agent\n" +
+      "Delegate\n" +
       "  external co-signer, added to specific\n" +
       "  accounts\n\n" +
       "Collaborators must accept the invitation\n" +

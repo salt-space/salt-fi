@@ -51,9 +51,8 @@ export async function checkRoboStatusFlow(salt: Salt, preselectedOrganisationId?
  * "online" but can't participate in keygen or signing, and ceremonies fail with
  * a RoboStatusError ("… host is not active. Activate your host via 2FA Flow").
  *
- * Owner action: signs a SIWE message embedding the host's setup OTP (proving
- * both wallet control and possession of the setup code). Single-use — the OTP is
- * consumed on success.
+ * Owner action: signs a SIWE message naming the host (salt-sdk 0.0.45 dropped the
+ * setup OTP from it). Single-use — Salt still consumes the OTP on success.
  *
  * `preselectedOrganisationId` skips the org picker (used by the getting-started wizard).
  */
@@ -86,15 +85,6 @@ export async function activateRoboFlow(
     p.log.success("This robo host has already completed 2FA activation — nothing to do.");
     return;
   }
-  if (!host.otp) {
-    s.stop("No setup code available");
-    p.log.error(
-      "This host record carries no setup OTP, so it can't be activated from here.\n" +
-        'Re-run "Set up Robo Guardians" to reissue setup (safe if the host never connected).',
-    );
-    return;
-  }
-
   // Activation consumes the setup OTP, and the setup script/CloudFormation use
   // that same OTP — so activating before the host has connected would leave you
   // unable to (re)provision it. Guard against that; the getting-started wizard
@@ -120,7 +110,7 @@ export async function activateRoboFlow(
   const s2 = p.spinner();
   s2.start("Activating robo host (signing the 2FA message)");
   try {
-    const activated = await salt.activateRoboHost({ roboId: host.id, otp: host.otp }, walletClient);
+    const activated = await salt.activateRoboHost({ roboId: host.id, roboName: host.name }, walletClient);
     if (activated.active) {
       s2.stop("Robo host activated");
       p.log.success('Robo Guardians activated — they can now join keygen and signing. Confirm any time via "Check robo guardians".');

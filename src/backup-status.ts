@@ -1,4 +1,4 @@
-import type { Salt, SaltAccount } from "salt-sdk";
+import { PolicyBreachError, type Salt, type SaltAccount } from "salt-sdk";
 import type { SaltWalletClient } from "./wallet.js";
 
 /**
@@ -49,6 +49,10 @@ export function backupStatusLabel(
  * Needs a `signer` that is one of the account's signers (the same wallet client
  * used to create/join it). Returns `true` on success, `false` if verification
  * fails — the caller can surface the thrown reason for detail.
+ *
+ * Both ceremonies sign messages, so from salt-sdk 0.0.45 a `denied_message_proposers`
+ * policy refuses them — and new accounts start with one listing every signer. That
+ * says nothing about the backup, so the `PolicyBreachError` is rethrown, not `false`.
  */
 export async function verifyKeyshareBackup(
   salt: Salt,
@@ -58,7 +62,8 @@ export async function verifyKeyshareBackup(
   try {
     await salt.verifyAccount({ accountId, signer });
     return true;
-  } catch {
+  } catch (err) {
+    if (err instanceof PolicyBreachError) throw err;
     return false;
   }
 }

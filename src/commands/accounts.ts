@@ -351,7 +351,14 @@ export async function verifyAccountBackupFlow(salt: Salt, walletClient: SaltWall
 
   const s = p.spinner();
   s.start("Verifying keyshare backup (running recovery + regular signing)");
-  const ok = await verifyKeyshareBackup(salt, account.id, walletClient);
+  let ok: boolean;
+  try {
+    ok = await verifyKeyshareBackup(salt, account.id, walletClient);
+  } catch (err) {
+    s.stop("Couldn't run the verification");
+    reportError(err);
+    return;
+  }
   s.stop(ok ? "Backup verified" : "Backup verification failed");
   if (ok) {
     p.log.success(`${account.name} is backed up and recoverable — its keyshares produce a valid signature.`);

@@ -1,20 +1,20 @@
 import * as p from "@clack/prompts";
-import type { Salt } from "salt-sdk";
+import type { Collaborator, Salt } from "salt-sdk";
 import { reportError } from "../errors.js";
 import { ACCESS_LEVEL_LABEL, pickOrganisation, select } from "../prompts.js";
 
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 
-const ACCESS_ROLE_BY_LEVEL: Record<number, "owner" | "member" | "agent"> = {
+const ACCESS_ROLE_BY_LEVEL: Record<number, "owner" | "member" | "delegate"> = {
   1: "owner",
   2: "member",
-  3: "agent",
+  3: "delegate",
 };
 
 const ACCESS_LEVEL_OPTIONS = [
   { value: "owner" as const, label: "Owner", hint: "full control, including membership" },
   { value: "member" as const, label: "Member", hint: "default" },
-  { value: "agent" as const, label: "Agent" },
+  { value: "delegate" as const, label: "Delegate" },
 ];
 
 /**
@@ -111,7 +111,70 @@ export async function inviteMemberFlow(salt: Salt, preselectedOrganisationId?: s
   }
 }
 
-export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
+/**
+ * Why suspending `address` would be refused, if it would. The Salt API keeps every organisation
+ * with at least one active owner, so the last one can't be suspended.
+ */
+export function suspendProblem(collaborators: readonly Pick<Collaborator, "address" | "accessLevel" | "status">[], address: string): string | undefined {
+  const target = address.toLowerCase();
+  const member = collaborators.find((m) => m.address.toLowerCase() === target);
+  if (member?.accessLevel !== 1) return undefined;
+  const otherActiveOwners = collaborators.filter((m) => m.accessLevel === 1 && m.status === "Active" && m.address.toLowerCase() !== target);
+  return otherActiveOwners.length === 0 ? "they're the organisation's only active owner, and it must keep one" : undefined;
+}
+
+/**
+ * Suspend an active collaborator or restore a suspended one (`updateCollaborator` with a
+ * `status`), then read them back to confirm. Suspended collaborators keep their access level
+ * but can't act until restored; unlike removing someone, it needs no fresh invitation to undo.
+ */
+async function setCollaboratorStatus(
+  salt: Salt,
+  organisationId: string,
+  collaborators: readonly Collaborator[],
+  member: Collaborator,
+  status: "Suspended" | "Active",
+  selfAddress: string,
+): Promise<void> {
+  const suspending = status === "Suspended";
+  const who = member.name ? `"${member.name}" (${member.address})` : member.address;
+  if (suspending) {
+    const problem = suspendProblem(collaborators, member.address);
+    if (problem) {
+      p.log.warn(`Can't suspend ${who}: ${problem}.`);
+      return;
+    }
+  }
+  const isSelf = member.address.toLowerCase() === selfAddress.toLowerCase();
+
+  const go = await p.confirm({
+    message: suspending
+      ? `Suspend ${who}?${isSelf ? " That's you: you won't be able to act here until another owner restores you." : ""}`
+      : `Restore ${who}?`,
+    initialValue: !suspending,
+  });
+  if (p.isCancel(go) || !go) return;
+
+  const s = p.spinner();
+  s.start(suspending ? "Suspending" : "Restoring");
+  try {
+    await salt.updateCollaborator(organisationId, member.address, { status });
+  } catch (err) {
+    s.stop(suspending ? "Failed to suspend" : "Failed to restore");
+    reportError(err);
+    return;
+  }
+  // Read back separately: a self-suspended owner may no longer be allowed to read the organisation.
+  try {
+    const { organisation } = await salt.getOrganisationById(organisationId);
+    const now = organisation.collaborators.find((m) => m.address.toLowerCase() === member.address.toLowerCase())?.status;
+    s.stop(now === status ? `${suspending ? "Suspended" : "Restored"} ${who}` : `Sent, but ${who} still reads as ${now ?? "not found"}`);
+  } catch {
+    s.stop(`Sent; couldn't read ${who} back to check`);
+  }
+}
+
+export async function manageCollaboratorsFlow(salt: Salt, selfAddress: string): Promise<void> {
   const organisationId = await pickOrganisation(salt, "Manage collaborators in which organisation?");
   if (!organisationId) return;
 
@@ -139,6 +202,24 @@ export async function manageCollaboratorsFlow(salt: Salt): Promise<void> {
   if (p.isCancel(memberAddress)) return;
 
   const member = organisation.collaborators.find((m) => m.address === memberAddress)!;
+
+  // Only Active and Suspended move between each other; anyone else goes straight to editing.
+  if (member.status === "Active" || member.status === "Suspended") {
+    const action = await select({
+      message: `What do you want to do with ${member.name || member.address}?`,
+      options: [
+        { value: "edit" as const, label: "Edit details", hint: "name, role, access level" },
+        member.status === "Active"
+          ? { value: "suspend" as const, label: "Suspend", hint: "keeps their access level, but they can't act until restored" }
+          : { value: "restore" as const, label: "Restore", hint: "suspended now; make them active again" },
+      ],
+    });
+    if (p.isCancel(action)) return;
+    if (action !== "edit") {
+      await setCollaboratorStatus(salt, organisationId, organisation.collaborators, member, action === "suspend" ? "Suspended" : "Active", selfAddress);
+      return;
+    }
+  }
 
   const name = await p.text({
     message: "Display name",

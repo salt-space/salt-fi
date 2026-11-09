@@ -100,7 +100,7 @@ export async function runMenu(salt: Salt, walletClient: SaltWalletClient): Promi
       entries: [
         { value: "create-org", label: "Create organisation", run: () => createOrganisationFlow(salt, walletClient).then(() => {}) },
         { value: "invite-member", label: "Invite collaborators", run: () => inviteMemberFlow(salt).then(() => {}) },
-        { value: "manage-collaborators", label: "Manage collaborators", run: () => manageCollaboratorsFlow(salt) },
+        { value: "manage-collaborators", label: "Manage collaborators", hint: "edit, suspend or restore", run: () => manageCollaboratorsFlow(salt, selfAddress) },
         { value: "invites", label: "Manage your invitations", run: () => manageInvitations(salt) },
         { value: "orgs", label: "List your organisations", run: () => listOrganisations(salt, selfAddress) },
       ],

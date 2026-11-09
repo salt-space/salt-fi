@@ -1,7 +1,9 @@
-// Load .env first so a SALT_ENV / PRIVATE_KEY set there is visible below. Nothing
+// Pick the profile named on the command line (`npm run dev b` → .env.b), then load
+// that file (or .env) so a SALT_ENV / PRIVATE_KEY set there is visible below. Nothing
 // that reads `network` (env/session/wallet/chains) is imported statically here —
 // the app is imported dynamically only after the environment is chosen, so those
 // modules resolve for the selected network.
+import "./load-profile.js";
 import "dotenv/config";
 import * as p from "@clack/prompts";
 
@@ -38,7 +40,8 @@ async function chooseEnv(): Promise<SaltEnv | null> {
 }
 
 async function main() {
-  p.intro("salt-fi");
+  const profile = process.env.DOTENV_CONFIG_PATH;
+  p.intro(profile ? `salt-fi · ${profile}` : "salt-fi");
 
   const env = await chooseEnv();
   if (!env) {
